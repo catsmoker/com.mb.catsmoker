@@ -63,6 +63,7 @@
 - [Usage](#usage)
 - [Supported Games](#-supported-games)
 - [Device Compatibility](#-device-compatibility)
+- [Documentation](#-documentation)
 - [Build From Source](#build-from-source)
 - [Star History](#-star-history)
 - [License](#-license)
@@ -137,6 +138,23 @@ CatSmoker supports over 50+ popular titles, including:
   - Xiaomi Redmi Note 14
   - Poco X3 NFC
   - Realme 9 Pro Plus
+
+---
+
+## 📚 Documentation
+
+Deep-dives into how the codebase works, aimed at contributors and power users:
+
+- [Architecture](docs/ARCHITECTURE.md) — stack, module layout, key components.
+- [Gaming Mode & the Gaming Engine](docs/GAMING_MODE.md) — what Gaming Mode does under the hood.
+- [Spoof Device](docs/SPOOF_DEVICE.md) — LSPosed / Shizuku / Magisk spoofing channels.
+- [Metrics Engine](docs/METRICS_ENGINE.md) — where every telemetry number comes from.
+- [Coding Style & Conventions](docs/CODING_STYLE.md) — the "honesty rules" the project follows.
+- [Security Model](docs/SECURITY.md) — privileges, the exported provider, and risk analysis.
+- [Translation & Localization](docs/TRANSLATION.md) — i18n state, conventions, and migration backlog.
+- [Contributing](docs/CONTRIBUTING.md) — how to help and request games.
+- [Build From Source](docs/BUILD.md) — build & test commands.
+- [FAQ](docs/FAQ.md) — common questions.
 
 ---
 
