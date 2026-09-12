@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="2048"
+    android:viewportHeight="2048">
+
+    <!-- Single cat eye from the launcher mark, blown up to small-icon size and
+         centered. White alpha-mask fill: the status bar renders small icons
+         from alpha only, so any tint would be discarded or blob. -->
+    <group
+        android:translateX="351.10"
+        android:translateY="33.16">
+        <group
+            android:pivotX="672.90"
+            android:pivotY="990.84"
+            android:scaleX="3.8"
+            android:scaleY="3.8">
+            <path
+                android:fillColor="#FFFFFF"
+                android:pathData="M485.97,857.50 C538.01,867.88 590.96,878.55 636.75,894.84 C624.75,941.17 639.38,993.52 670.25,1012.09 C722.64,1040.24 762.45,980.20 769.02,936.00 L771.04,936.00 C810.60,959.49 863.24,1000.79 868.44,1057.49 C812.50,1102.45 713.43,1124.18 627.75,1092.10 C545.65,1061.45 477.36,975.70 485.97,857.50 Z" />
+        </group>
+    </group>
+</vector>

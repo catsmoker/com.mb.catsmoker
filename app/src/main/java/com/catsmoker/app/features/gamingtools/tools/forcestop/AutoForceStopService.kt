@@ -282,10 +282,10 @@ class AutoForceStopService : Service() {
             .setContentTitle(getString(R.string.gt_svc_afs_title))
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_name)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
-            .addAction(0, getString(R.string.notification_stop), stop)
+            .addAction(R.drawable.ic_action_name, getString(R.string.notification_stop), stop)
             .build()
     }
 

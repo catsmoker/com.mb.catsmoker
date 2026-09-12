@@ -178,10 +178,10 @@ class PerformanceOverlayService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.gt_svc_perf_title))
-            .setSmallIcon(android.R.drawable.ic_menu_info_details)
+            .setSmallIcon(R.drawable.ic_stat_name)
             .setOngoing(true)
-            .addAction(0, if (overlayView != null) getString(R.string.gt_svc_perf_hide) else getString(R.string.gt_svc_perf_show), toggle)
-            .addAction(0, getString(R.string.notification_stop), stop)
+            .addAction(R.drawable.ic_action_name, if (overlayView != null) getString(R.string.gt_svc_perf_hide) else getString(R.string.gt_svc_perf_show), toggle)
+            .addAction(R.drawable.ic_action_name, getString(R.string.notification_stop), stop)
             .build()
     }
 

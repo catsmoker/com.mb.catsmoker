@@ -166,7 +166,7 @@ class VpnFirewallService : VpnService() {
             .setContentTitle(getString(R.string.gt_svc_vpn_title))
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_name)
             .setOngoing(true)
             .setContentIntent(mainActivityIntent())
             // The same stop path the in-app switch uses ([VpnFirewall.stop] sends this action), so
@@ -174,7 +174,7 @@ class VpnFirewallService : VpnService() {
             // getForegroundService, not getService: from API 26 a service started from a
             // notification action must call startForeground, which onStartCommand does on entry.
             .addAction(
-                0,
+                R.drawable.ic_action_name,
                 getString(R.string.notification_stop),
                 PendingIntent.getForegroundService(
                     this,

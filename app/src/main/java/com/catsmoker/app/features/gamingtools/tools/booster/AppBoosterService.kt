@@ -132,10 +132,10 @@ class AppBoosterService : Service() {
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.booster_running_title))
             .setContentText(contentText(state))
-            .setSmallIcon(android.R.drawable.ic_popup_sync)
+            .setSmallIcon(R.drawable.ic_stat_name)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
-            .addAction(0, getString(R.string.booster_notification_stop), stop)
+            .addAction(R.drawable.ic_action_name, getString(R.string.booster_notification_stop), stop)
 
         val progress = state.progress
         if (progress == null) {

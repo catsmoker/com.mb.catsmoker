@@ -427,13 +427,13 @@ class CrosshairOverlayService : Service() {
             .setContentTitle(
                 if (isMoveMode) getString(R.string.gt_svc_cross_moving) else getString(R.string.gt_svc_cross_active)
             )
-            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setSmallIcon(R.drawable.ic_stat_name)
             .setOngoing(true)
 
         // getForegroundService, not getService: from API 26 a service started from a notification
         // action must call startForeground, and onStartCommand does that on every path.
         builder.addAction(
-            0,
+            R.drawable.ic_action_name,
             getString(R.string.notification_stop),
             PendingIntent.getForegroundService(
                 this,

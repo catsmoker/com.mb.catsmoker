@@ -132,10 +132,10 @@ class DexoptSweepWorker @AssistedInject constructor(
         val builder = NotificationCompat.Builder(applicationContext, AppBoosterService.CHANNEL_ID)
             .setContentTitle(applicationContext.getString(R.string.booster_scheduled_title))
             .setContentText(contentText(state))
-            .setSmallIcon(android.R.drawable.ic_popup_sync)
+            .setSmallIcon(R.drawable.ic_stat_name)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
-            .addAction(0, applicationContext.getString(R.string.booster_notification_stop), stop)
+            .addAction(R.drawable.ic_action_name, applicationContext.getString(R.string.booster_notification_stop), stop)
 
         val progress = state.progress
         if (progress == null) {
@@ -171,7 +171,7 @@ class DexoptSweepWorker @AssistedInject constructor(
             .setContentTitle(applicationContext.getString(R.string.booster_scheduled_title))
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setSmallIcon(android.R.drawable.ic_popup_sync)
+            .setSmallIcon(R.drawable.ic_stat_name)
             .setAutoCancel(true)
             .build()
         manager.notify(SKIPPED_NOTIFICATION_ID, notification)

@@ -103,12 +103,12 @@ class GamingModeService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.gt_svc_gm_title))
             .setContentText(getString(R.string.gt_svc_gm_text))
-            .setSmallIcon(R.drawable.ic_launcher_foreground) // Use appropriate icon
+            .setSmallIcon(R.drawable.ic_stat_name)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setSilent(true)
             .setContentIntent(pi)
-            .addAction(0, getString(R.string.notification_stop), stop)
+            .addAction(R.drawable.ic_action_name, getString(R.string.notification_stop), stop)
             .build()
     }
 
