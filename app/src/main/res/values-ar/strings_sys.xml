@@ -1,0 +1,47 @@
+<resources>
+    <!-- Settings screen + update flow + support dialog. Language endonyms stay native in every locale. -->
+    <string name="sys_settings_title">الإعدادات</string>
+    <string name="sys_settings_subtitle">إعدادات التطبيق وتفضيلاته.</string>
+    <string name="sys_section_general">عام</string>
+    <string name="sys_ads_title">تفعيل الإعلانات</string>
+    <string name="sys_section_updates">التحديثات</string>
+    <string name="sys_updating">جارٍ تنزيل التحديث…</string>
+    <string name="sys_check_updates">التحقق من وجود تحديثات</string>
+    <string name="sys_auto_check">التحقق التلقائي من التحديثات</string>
+    <string name="sys_update_available">يتوفر تحديث: %1$s</string>
+    <string name="sys_update_prompt">يتوفر إصدار جديد. هل تريد تنزيله وتثبيته الآن؟</string>
+    <string name="sys_download">تنزيل</string>
+    <string name="sys_later">لاحقًا</string>
+    <string name="sys_section_management">الإدارة</string>
+    <string name="sys_permissions_title">أذونات التطبيق</string>
+    <string name="sys_permissions_subtitle">إدارة الأذونات الممنوحة.</string>
+    <string name="sys_logs_title">سجلات النظام</string>
+    <string name="sys_logs_subtitle">عرض تشخيصات التطبيق والنظام.</string>
+    <string name="sys_section_appearance">المظهر</string>
+    <string name="sys_theme_title">السمة</string>
+    <string name="sys_theme_subtitle">شاشات داكنة أو فاتحة.</string>
+    <string name="sys_theme_system">افتراضي النظام</string>
+    <string name="sys_theme_dark">داكن</string>
+    <string name="sys_theme_light">فاتح</string>
+    <string name="sys_language_title">اللغة</string>
+    <string name="sys_language_subtitle">لغة التطبيق. تُطبق فورًا.</string>
+    <string name="sys_lang_system">افتراضي النظام</string>
+    <string name="sys_lang_english">English</string>
+    <string name="sys_lang_arabic">العربية</string>
+    <string name="sys_lang_spanish">Español</string>
+    <string name="sys_lang_chinese">中文 (简体)</string>
+    <string name="sys_checking_updates">جارٍ التحقق من وجود تحديثات…</string>
+    <string name="sys_no_releases">لم يتم العثور على إصدارات في GitHub</string>
+    <string name="sys_up_to_date">التطبيق محدّث (الإصدار %1$s)</string>
+    <string name="sys_no_suitable_release">لم يتم العثور على إصدار مناسب</string>
+    <string name="sys_update_check_failed">فشل التحقق من التحديث: %1$s</string>
+    <string name="sys_download_failed">فشل التنزيل: %1$s</string>
+    <string name="sys_support_title">ادعم المطوّر</string>
+    <string name="sys_support_text">يرجى منح المشروع نجمة على GitHub والتبرع لدعم المطوّر عبر PayPal.</string>
+    <string name="sys_support_star">نجمة</string>
+    <string name="sys_support_donate">تبرع</string>
+    <!-- First-run onboarding step one. -->
+    <string name="sys_first_run_title">مرحبًا بك في CatSmoker</string>
+    <string name="sys_first_run_subtitle">اختر مظهر التطبيق ولغته. يمكنك تغيير هذا لاحقًا من الإعدادات.</string>
+    <string name="sys_continue">متابعة</string>
+</resources>

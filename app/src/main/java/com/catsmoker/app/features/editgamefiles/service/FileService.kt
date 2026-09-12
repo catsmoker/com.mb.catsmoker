@@ -4,6 +4,7 @@ import android.content.Context
 import com.catsmoker.app.IFileService
 import com.catsmoker.app.shizuku.CommandResult
 import java.io.File
+import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
 /**
@@ -100,6 +101,42 @@ class FileService : IFileService.Stub {
         File("/proc/stat").readText()
     } catch (_: Exception) {
         ""
+    }
+
+    /**
+     * Reads a whole file in one privileged process. Null means "not there / not readable" —
+     * the caller distinguishes that from an empty file, which comes back as a zero-length
+     * array. The file channel is opened inside this process (shell UID), so a save the game
+     * wrote under its own ownership reads where the app's own uid cannot.
+     */
+    override fun readFile(path: String?): ByteArray? {
+        if (path.isNullOrEmpty()) return null
+        return try {
+            File(path).takeIf { it.isFile }?.readBytes()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Writes [data] over [path] in one privileged process. Every byte is flushed to storage
+     * inside this call — getFD().sync() before close — so the binder reply is the report,
+     * per the house rule that a write reports what storage holds, not what was sent.
+     */
+    override fun writeFile(path: String?, data: ByteArray?): Boolean {
+        if (path.isNullOrEmpty() || data == null) return false
+        return try {
+            val file = File(path)
+            file.parentFile?.let { parent -> if (!parent.isDirectory) parent.mkdirs() }
+            FileOutputStream(file).use { out ->
+                out.write(data)
+                out.flush()
+                out.fd.sync()
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun readTrimmed(file: File): String? = try {

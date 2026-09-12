@@ -114,12 +114,11 @@ Utilizes the LSPosed framework to hook into game processes at runtime. This allo
 ## 🎮 Supported Games
 
 CatSmoker supports over 50+ popular titles, including:
-- **Call of Duty: Mobile / Warzone**
-- **PUBG Mobile / BGMI / New State**
-- **Free Fire / Free Fire MAX**
-- **Genshin Impact / Honkai: Star Rail**
-- **League of Legends: Wild Rift**
-- **Farlight 84 / Apex Legends (Mobile)**
+- **PUBG Mobile all variants**
+- **Genshin Impact**
+- **Honkai: Star Rail**
+- **wuthering waves**
+- **Grid Autosport**
 - *And many more...*
 
 > [!TIP]
@@ -153,7 +152,7 @@ The debug APK is generated at `app/build/outputs/apk/debug/app-debug.apk`.
 ---
 
 ## 🛡️ Disclaimer
-**Warning**: Modifying game files or spoofing device identity may violate some games' Terms of Service. Use CatSmoker responsibly. The developers are not responsible for account bans, hardware issues, or bootloops.
+**Warning**: Modifying game files or spoofing device identity may violate some games' Terms of Service. Use CatSmoker responsibly. The developers are not responsible for account bans, hardware issues, or boot-loops.
 
 ---
 

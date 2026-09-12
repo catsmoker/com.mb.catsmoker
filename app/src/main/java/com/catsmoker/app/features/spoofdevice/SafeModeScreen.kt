@@ -12,10 +12,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.catsmoker.app.R
 import com.catsmoker.app.shared.ui.components.ScreenScaffold
 import com.catsmoker.app.shared.ui.components.SectionCard
 
@@ -42,15 +43,15 @@ fun SafeModeScreen(
     }
 
     ScreenScaffold(
-        title = "Safe Mode",
-        subtitle = "Bypass version spoofing for selected apps.",
+        title = stringResource(R.string.spoof_menu_safe),
+        subtitle = stringResource(R.string.spoof_safe_subtitle),
         onBack = onBack
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             Text(
-                "Safe Mode prevents apps from seeing a spoofed Android version if it would cause them to crash. Other spoofing (Model, IMEI) still applies.",
+                stringResource(R.string.spoof_safe_desc),
                 fontSize = 12.sp,
-                color = Color.Gray,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
@@ -58,7 +59,7 @@ fun SafeModeScreen(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    label = { Text("Search Apps") },
+                    label = { Text(stringResource(R.string.spoof_search_apps)) },
                     modifier = Modifier.fillMaxWidth(),
                     leadingIcon = { Icon(Icons.Default.Search, null) }
                 )
@@ -107,7 +108,7 @@ fun SafeModeItem(
             Box(
                 modifier = Modifier
                     .size(48.dp)
-                    .background(Color.White.copy(alpha = 0.05f), androidx.compose.foundation.shape.CircleShape),
+                    .background(MaterialTheme.colorScheme.surfaceVariant, androidx.compose.foundation.shape.CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Image(
@@ -122,14 +123,14 @@ fun SafeModeItem(
                     text = app.label,
                     fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                     fontSize = 16.sp,
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
                 Text(
                     text = app.packageName,
                     fontSize = 11.sp,
-                    color = Color.Gray,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
@@ -141,8 +142,8 @@ fun SafeModeItem(
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = MaterialTheme.colorScheme.primary,
                     checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                    uncheckedThumbColor = Color.Gray,
-                    uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
+                    uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    uncheckedTrackColor = MaterialTheme.colorScheme.outlineVariant
                 )
             )
         }

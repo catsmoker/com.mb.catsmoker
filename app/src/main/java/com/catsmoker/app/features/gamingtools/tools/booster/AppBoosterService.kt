@@ -180,7 +180,7 @@ class AppBoosterService : Service() {
         getSystemService(NotificationManager::class.java)
 
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(CHANNEL_ID, "App Booster", NotificationManager.IMPORTANCE_LOW)
+        val channel = NotificationChannel(CHANNEL_ID, getString(R.string.gt_svc_booster_channel), NotificationManager.IMPORTANCE_LOW)
         notificationManager()?.createNotificationChannel(channel)
     }
 
@@ -189,7 +189,12 @@ class AppBoosterService : Service() {
         const val EXTRA_MODE = "mode"
         const val EXTRA_FORCE = "force"
         const val DEFAULT_MODE = "speed-profile"
-        private const val CHANNEL_ID = "app_booster_channel"
+
+        /**
+         * Shared with the scheduled sweep's worker: both surfaces post about the same engine run,
+         * so they belong on one channel rather than two notifications that behave differently.
+         */
+        const val CHANNEL_ID = "app_booster_channel"
         private const val NOTIFICATION_ID = 101
         private const val REQUEST_STOP = 1
         private const val STOP_GRACE_MS = 3000L

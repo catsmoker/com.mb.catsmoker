@@ -1,6 +1,7 @@
 package com.catsmoker.app.shared.ui.components
 
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
@@ -17,7 +18,7 @@ import androidx.compose.ui.unit.dp
  */
 @Composable
 fun DotGridBackground(modifier: Modifier = Modifier) {
-    val dotColor = Color.White.copy(alpha = 0.05f)
+    val dotColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
     Spacer(
         modifier = modifier.drawWithCache {
             val step = 10.dp.toPx()

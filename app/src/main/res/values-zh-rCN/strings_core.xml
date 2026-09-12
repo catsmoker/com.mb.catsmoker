@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Core dashboard / navigation strings (feature: main, about, logs, permissions, startup). -->
+    <!-- Back-press exit toast (%1$d = remaining taps). -->
+    <string name="core_exit_tap">再点按 %1$d 次即可退出</string>
+
+    <!-- Dashboard metric abbreviations (kept short in every locale). -->
+    <string name="core_metric_cpu">CPU</string>
+    <string name="core_metric_ram">RAM</string>
+    <string name="core_metric_soc">SOC</string>
+    <string name="core_metric_temp">TEMP</string>
+    <string name="core_metric_ping">PING</string>
+
+    <!-- Compact fallback labels shown in place of a missing dashboard reading. -->
+    <string name="core_compact_loading">…</string>
+    <string name="core_compact_privilege">root?</string>
+    <string name="core_compact_unsupported">n/s</string>
+    <string name="core_compact_na">N/A</string>
+
+    <!-- Dashboard Settings tile (only tile without a shared entry). -->
+    <string name="core_settings_title">设置</string>
+    <string name="core_settings_subtitle">配置与偏好设置</string>
+
+    <!-- About screen. -->
+    <string name="core_about_subtitle">应用信息与社区。</string>
+    <string name="core_about_description">CatSmoker 是一款适用于 Android 的开源性能工具。我们的使命是通过优化系统资源并释放隐藏潜力，为玩家提供最佳体验。</string>
+
+    <!-- Logs screen ViewModel messages (%1$s = detail). -->
+    <string name="core_logs_fetch_error">获取日志失败：%1$s</string>
+    <string name="core_logs_share_title">分享日志</string>
+
+    <!-- Shared scaffold back button (talkback). -->
+    <string name="core_back">返回</string>
+
+    <!-- Onboarding terms step. Prefix/suffix carry their edge space via \u0020. -->
+    <string name="core_terms_prefix">使用本应用前，请先阅读</string>
+    <string name="core_terms_link">条款与条件</string>
+    <string name="core_terms_suffix">。</string>
+    <string name="core_terms_title">服务条款</string>
+    <string name="core_terms_agree">我同意这些条款。</string>
+    <string name="core_continue">继续</string>
+
+    <!-- Permissions screen. -->
+    <string name="core_permissions_title">权限</string>
+    <string name="core_permissions_subtitle">授予权限以启用所有功能。</string>
+    <string name="core_perm_root_title">Root 权限</string>
+    <string name="core_perm_root_sub">高级优化所需。</string>
+    <string name="core_perm_shizuku_title">Shizuku 权限</string>
+    <string name="core_perm_shizuku_sub">系统调节的 Root 替代方案。</string>
+    <string name="core_perm_storage_title">存储权限</string>
+    <string name="core_perm_storage_sub">用于读取/修改游戏配置文件。</string>
+    <string name="core_perm_battery_title">电池优化</string>
+    <string name="core_perm_battery_sub">允许应用在后台流畅运行。</string>
+    <string name="core_perm_notif_title">通知</string>
+    <string name="core_perm_notif_sub">用于显示服务状态。</string>
+    <string name="core_perm_overlay_title">悬浮窗</string>
+    <string name="core_perm_overlay_sub">用于显示性能监控。</string>
+    <string name="core_perm_usage_title">使用情况统计</string>
+    <string name="core_perm_usage_sub">用于统计游戏时长。</string>
+    <string name="core_perm_mic_title">麦克风</string>
+    <string name="core_perm_mic_sub">音频增强功能所需。</string>
+    <string name="core_perm_bt_title">蓝牙</string>
+    <string name="core_perm_bt_sub">手柄与耳机优化所需。</string>
+    <string name="core_done">完成</string>
+    <string name="core_grant">授予</string>
+    <!-- MetricReadStatus full labels: the reason shown in place of a value on the dashboard
+         and in the performance overlay, when the device never reported a number. -->
+    <string name="core_read_loading">正在读取…</string>
+    <string name="core_read_ok">正常</string>
+    <string name="core_read_empty">无数据</string>
+    <string name="core_read_parse">无法读取</string>
+    <string name="core_read_privilege">需要 root 或 Shizuku</string>
+    <string name="core_read_unsupported">不支持</string>
+</resources>

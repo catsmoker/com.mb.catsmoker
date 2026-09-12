@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.os.Build
 import android.provider.Settings
+import com.catsmoker.app.R
 import com.catsmoker.app.system.shell.ShellRunner
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -133,8 +134,7 @@ class DnsFeature @Inject constructor(
             unsupportedReason = if (supported) {
                 null
             } else {
-                "Your phone is too old for this. It needs Android 9 and yours is Android " +
-                    "${Build.VERSION.RELEASE}."
+                context.getString(R.string.gt_dns_old_phone, Build.VERSION.RELEASE)
             },
             canWrite = canWriteGlobal()
         )
@@ -153,18 +153,17 @@ class DnsFeature @Inject constructor(
         if (!specifierOk) {
             return@withContext Outcome(
                 false,
-                "Your phone would not accept ${provider.label}. It was asked using $guard and did " +
-                    "not keep the change."
+                context.getString(R.string.gt_dns_refused_provider, provider.label, guard)
             )
         }
         val modeOk = putGlobal(KEY_MODE, Mode.PROVIDER.settingValue)
         if (!modeOk) {
             return@withContext Outcome(
                 false,
-                "${provider.label} was set, but your phone would not switch over to using it."
+                context.getString(R.string.gt_dns_set_not_switched, provider.label)
             )
         }
-        Outcome(true, "Now using ${provider.label}.")
+        Outcome(true, context.getString(R.string.gt_dns_now_using_toast, provider.label))
     }
 
     /** Switches to `opportunistic` — encrypted where the network supports it, and clears the hostname. */
@@ -173,11 +172,10 @@ class DnsFeature @Inject constructor(
         if (!putGlobal(KEY_MODE, Mode.AUTOMATIC.settingValue)) {
             return@withContext Outcome(
                 false,
-                "Your phone would not switch to Automatic. It was asked using $guard and did not " +
-                    "keep the change."
+                context.getString(R.string.gt_dns_no_auto, guard)
             )
         }
-        Outcome(true, "Set to Automatic.")
+        Outcome(true, context.getString(R.string.gt_dns_auto_done))
     }
 
     /** Turns Private DNS off, leaving the network's own resolvers in use unencrypted. */
@@ -186,11 +184,10 @@ class DnsFeature @Inject constructor(
         if (!putGlobal(KEY_MODE, Mode.OFF.settingValue)) {
             return@withContext Outcome(
                 false,
-                "Your phone would not turn it off. It was asked using $guard and did not keep the " +
-                    "change."
+                context.getString(R.string.gt_dns_no_off, guard)
             )
         }
-        Outcome(true, "Turned off.")
+        Outcome(true, context.getString(R.string.gt_dns_off_done))
     }
 
     // ------------------------------------------------------------------------ plumbing
@@ -205,14 +202,13 @@ class DnsFeature @Inject constructor(
     private fun writeGuard(): String? = when {
         shellRunner.isRootAvailable() -> "root"
         shellRunner.hasPrivilege() -> "Shizuku"
-        canWriteGlobalDirectly() -> "the permission granted over adb"
+        canWriteGlobalDirectly() -> context.getString(R.string.gt_dns_guard_adb)
         else -> null
     }
 
     private fun guardFailure() = Outcome(
         false,
-        "Needs root or Shizuku. Android does not let a normal app change this. You can still change " +
-            "it yourself in Settings → Network & internet → Private DNS."
+        context.getString(R.string.gt_dns_need)
     )
 
     private fun canWriteGlobal(): Boolean = writeGuard() != null

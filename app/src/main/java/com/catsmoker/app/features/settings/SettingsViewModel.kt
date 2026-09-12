@@ -7,7 +7,9 @@ import androidx.core.content.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.catsmoker.app.BuildConfig
+import com.catsmoker.app.R
 import com.catsmoker.app.system.ads.AdManager
+import com.catsmoker.app.system.config.AppearanceStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -42,15 +44,26 @@ class SettingsViewModel @Inject constructor(
         val isUpdating: Boolean = false,
         val updateProgress: Float = 0f,
         val updateDialog: UpdateDialog? = null,
+        val themeMode: AppearanceStore.ThemeMode = AppearanceStore.ThemeMode.SYSTEM,
+        /** BCP-47 tag, or "" for system default. Endonyms stay native — never localized. */
+        val languageTag: String = AppearanceStore.LANGUAGE_SYSTEM,
     )
 
     data class UpdateDialog(val tagName: String, val downloadUrl: String?)
+
+    /** One-shot UI actions the screen itself must perform (e.g. recreating for a new locale). */
+    sealed interface UiEvent {
+        data object RecreateActivity : UiEvent
+    }
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
     private val _toasts = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val toasts: SharedFlow<String> = _toasts.asSharedFlow()
+
+    private val _events = MutableSharedFlow<UiEvent>(extraBufferCapacity = 1)
+    val events: SharedFlow<UiEvent> = _events.asSharedFlow()
 
     private val prefs by lazy { context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
 
@@ -59,9 +72,27 @@ class SettingsViewModel @Inject constructor(
             it.copy(
                 adsEnabled = adManager.isEnabled(),
                 autoCheck = prefs.getBoolean("auto_check_update", false),
-                isPreRelease = prefs.getBoolean("use_prerelease", false)
+                isPreRelease = prefs.getBoolean("use_prerelease", false),
+                themeMode = AppearanceStore.themeModeSync(context),
+                languageTag = AppearanceStore.languageTag(context)
             )
         }
+    }
+
+    fun onThemeModeChanged(mode: AppearanceStore.ThemeMode) {
+        // Live-recomposes via AppearanceStore.themeMode — no activity restart needed.
+        AppearanceStore.setThemeMode(context, mode)
+        _uiState.update { it.copy(themeMode = mode) }
+    }
+
+    fun onLanguageChanged(tag: String) {
+        if (tag == _uiState.value.languageTag) return
+        AppearanceStore.setLanguage(context, tag)
+        _uiState.update { it.copy(languageTag = tag) }
+        // Resources are bound to the activity's configuration — only a recreate re-resolves
+        // every stringResource/getString in the composition, so the new language is instant
+        // everywhere instead of only on screens opened afterwards.
+        _events.tryEmit(UiEvent.RecreateActivity)
     }
 
     fun onAdsToggled(enabled: Boolean) {
@@ -80,7 +111,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun onCheckUpdates() {
-        _toasts.tryEmit("Checking for updates...")
+        _toasts.tryEmit(context.getString(R.string.sys_checking_updates))
         performUpdateCheck(_uiState.value.isPreRelease)
     }
 
@@ -105,24 +136,24 @@ class SettingsViewModel @Inject constructor(
                 val releases = fetchReleases()
                 if (releases.length() == 0) {
                     withContext(Dispatchers.Main) {
-                        _toasts.tryEmit("No releases found on GitHub")
+                        _toasts.tryEmit(context.getString(R.string.sys_no_releases))
                     }
                     return@launch
                 }
-                
+
                 val latestRelease = findLatestRelease(releases, isPreRelease)
                 withContext(Dispatchers.Main) {
                     if (latestRelease != null) {
                         if (!processReleaseData(latestRelease)) {
-                            _toasts.tryEmit("App is up to date (v${BuildConfig.VERSION_NAME})")
+                            _toasts.tryEmit(context.getString(R.string.sys_up_to_date, BuildConfig.VERSION_NAME))
                         }
                     } else {
-                        _toasts.tryEmit("No suitable release found")
+                        _toasts.tryEmit(context.getString(R.string.sys_no_suitable_release))
                     }
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    _toasts.tryEmit("Update check failed: ${e.message}")
+                    _toasts.tryEmit(context.getString(R.string.sys_update_check_failed, e.message ?: "?"))
                 }
             }
         }
@@ -201,7 +232,7 @@ class SettingsViewModel @Inject constructor(
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     _uiState.update { it.copy(isUpdating = false) }
-                    _toasts.tryEmit("Download failed: ${e.message}")
+                    _toasts.tryEmit(context.getString(R.string.sys_download_failed, e.message ?: "?"))
                 }
             }
         }

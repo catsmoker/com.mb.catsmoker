@@ -12,7 +12,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
@@ -36,7 +35,7 @@ fun AboutRoute(onBack: () -> Unit) {
 fun AboutScreen(onBack: () -> Unit) {
     val uriHandler = LocalUriHandler.current
 
-    ScreenScaffold(title = stringResource(R.string.about_header_title), subtitle = "App information and community.", onBack = onBack) {
+    ScreenScaffold(title = stringResource(R.string.about_header_title), subtitle = stringResource(R.string.core_about_subtitle), onBack = onBack) {
         Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp)) {
             // Header
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -44,8 +43,8 @@ fun AboutScreen(onBack: () -> Unit) {
                     Icon(Icons.Default.Info, null, modifier = Modifier.padding(12.dp))
                 }
                 Spacer(modifier = Modifier.height(12.dp))
-                Text(text = stringResource(R.string.app_name), fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color.White)
-                Text(text = "v${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = Color.Gray)
+                Text(text = stringResource(R.string.app_name), fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurface)
+                Text(text = "v${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
@@ -85,12 +84,12 @@ fun AboutScreen(onBack: () -> Unit) {
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-            Text("About CatSmoker", style = MaterialTheme.typography.titleMedium, color = Color.White)
+            Text(stringResource(R.string.about_header_title), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "CatSmoker is an open-source performance utility for Android. Our mission is to provide gamers with the best possible experience by optimizing system resources and unlocking hidden potential.",
+                text = stringResource(R.string.core_about_description),
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color.White.copy(alpha = 0.7f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -114,14 +113,14 @@ fun SocialIcon(
             Icon(
                 painter = painter,
                 contentDescription = null,
-                tint = Color.White,
+                tint = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.size(20.dp)
             )
         } else if (imageVector != null) {
             Icon(
                 imageVector = imageVector,
                 contentDescription = null,
-                tint = Color.White,
+                tint = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.size(20.dp)
             )
         }

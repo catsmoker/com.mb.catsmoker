@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.catsmoker.app.R
 import com.catsmoker.app.system.shell.ShellRunner
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -47,7 +48,7 @@ class LogsViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    _uiState.update { it.copy(isLoading = false, logs = listOf("Error fetching logs: ${e.message}")) }
+                    _uiState.update { it.copy(isLoading = false, logs = listOf(context.getString(R.string.core_logs_fetch_error, e.message))) }
                 }
             }
         }
@@ -71,7 +72,7 @@ class LogsViewModel @Inject constructor(
             putExtra(Intent.EXTRA_TEXT, allLogs)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        context.startActivity(Intent.createChooser(intent, "Share Logs").apply {
+        context.startActivity(Intent.createChooser(intent, context.getString(R.string.core_logs_share_title)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         })
     }

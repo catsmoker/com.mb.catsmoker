@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Core dashboard / navigation strings (feature: main, about, logs, permissions, startup). -->
+    <!-- Back-press exit toast (%1$d = remaining taps). -->
+    <string name="core_exit_tap">Toca %1$d veces más para salir</string>
+
+    <!-- Dashboard metric abbreviations (kept short in every locale). -->
+    <string name="core_metric_cpu">CPU</string>
+    <string name="core_metric_ram">RAM</string>
+    <string name="core_metric_soc">SOC</string>
+    <string name="core_metric_temp">TEMP</string>
+    <string name="core_metric_ping">PING</string>
+
+    <!-- Compact fallback labels shown in place of a missing dashboard reading. -->
+    <string name="core_compact_loading">…</string>
+    <string name="core_compact_privilege">root?</string>
+    <string name="core_compact_unsupported">n/s</string>
+    <string name="core_compact_na">N/A</string>
+
+    <!-- Dashboard Settings tile (only tile without a shared entry). -->
+    <string name="core_settings_title">Ajustes</string>
+    <string name="core_settings_subtitle">Configuración y preferencias</string>
+
+    <!-- About screen. -->
+    <string name="core_about_subtitle">Información de la app y comunidad.</string>
+    <string name="core_about_description">CatSmoker es una utilidad de rendimiento de código abierto para Android. Nuestra misión es brindar a los jugadores la mejor experiencia posible optimizando los recursos del sistema y liberando su potencial oculto.</string>
+
+    <!-- Logs screen ViewModel messages (%1$s = detail). -->
+    <string name="core_logs_fetch_error">Error al obtener los registros: %1$s</string>
+    <string name="core_logs_share_title">Compartir registros</string>
+
+    <!-- Shared scaffold back button (talkback). -->
+    <string name="core_back">Atrás</string>
+
+    <!-- Onboarding terms step. Prefix/suffix carry their edge space via \u0020. -->
+    <string name="core_terms_prefix">Lee nuestros\u0020</string>
+    <string name="core_terms_link">Términos y condiciones</string>
+    <string name="core_terms_suffix">\u0020antes de usar la app.</string>
+    <string name="core_terms_title">Términos del servicio</string>
+    <string name="core_terms_agree">Acepto los términos.</string>
+    <string name="core_continue">CONTINUAR</string>
+
+    <!-- Permissions screen. -->
+    <string name="core_permissions_title">Permisos</string>
+    <string name="core_permissions_subtitle">Otorga permisos para activar todas las funciones.</string>
+    <string name="core_perm_root_title">Acceso root</string>
+    <string name="core_perm_root_sub">Necesario para optimizaciones avanzadas.</string>
+    <string name="core_perm_shizuku_title">Acceso Shizuku</string>
+    <string name="core_perm_shizuku_sub">Alternativa a root para ajustes del sistema.</string>
+    <string name="core_perm_storage_title">Acceso al almacenamiento</string>
+    <string name="core_perm_storage_sub">Para leer y modificar archivos de configuración de juegos.</string>
+    <string name="core_perm_battery_title">Optimización de batería</string>
+    <string name="core_perm_battery_sub">Permite que la app funcione bien en segundo plano.</string>
+    <string name="core_perm_notif_title">Notificaciones</string>
+    <string name="core_perm_notif_sub">Para mostrar el estado del servicio.</string>
+    <string name="core_perm_overlay_title">Superposición</string>
+    <string name="core_perm_overlay_sub">Para mostrar monitores de rendimiento.</string>
+    <string name="core_perm_usage_title">Estadísticas de uso</string>
+    <string name="core_perm_usage_sub">Para registrar el tiempo de juego.</string>
+    <string name="core_perm_mic_title">Micrófono</string>
+    <string name="core_perm_mic_sub">Necesario para las funciones de mejora de audio.</string>
+    <string name="core_perm_bt_title">Bluetooth</string>
+    <string name="core_perm_bt_sub">Necesario para optimizaciones de mandos y auriculares.</string>
+    <string name="core_done">LISTO</string>
+    <string name="core_grant">OTORGAR</string>
+    <!-- MetricReadStatus full labels: the reason shown in place of a value on the dashboard
+         and in the performance overlay, when the device never reported a number. -->
+    <string name="core_read_loading">leyendo…</string>
+    <string name="core_read_ok">ok</string>
+    <string name="core_read_empty">sin datos</string>
+    <string name="core_read_parse">ilegible</string>
+    <string name="core_read_privilege">necesita root o Shizuku</string>
+    <string name="core_read_unsupported">no compatible</string>
+</resources>

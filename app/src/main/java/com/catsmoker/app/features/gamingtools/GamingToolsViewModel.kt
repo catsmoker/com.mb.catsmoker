@@ -12,15 +12,19 @@ import androidx.core.content.edit
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.catsmoker.app.R
 import com.catsmoker.app.features.gamingtools.engine.AnimationScaleKind
 import com.catsmoker.app.features.gamingtools.engine.GamingEngine
 import com.catsmoker.app.features.gamingtools.engine.GamingModeService
 import com.catsmoker.app.shared.data.model.GameInfo
 import com.catsmoker.app.features.gamingtools.tools.audio.AudioBoostController
+import com.catsmoker.app.features.gamingtools.tools.cleaner.CleanerPatternStore
 import com.catsmoker.app.features.gamingtools.tools.cleaner.CleaningFeature
 import com.catsmoker.app.features.gamingtools.tools.graphics.GameDeveloperOptions
 import com.catsmoker.app.features.gamingtools.tools.forcestop.KeepAliveStore
 import com.catsmoker.app.features.gamingtools.tools.booster.AppBoosterService
+import com.catsmoker.app.features.gamingtools.tools.booster.DexoptScheduleStore
+import com.catsmoker.app.features.gamingtools.tools.booster.DexoptSweepScheduler
 import com.catsmoker.app.features.gamingtools.tools.forcestop.AutoForceStopService
 import com.catsmoker.app.features.gamingtools.tools.crosshair.CrosshairOverlayService
 import com.catsmoker.app.features.gamingtools.tools.crosshair.CrosshairPositionStore
@@ -60,11 +64,14 @@ class GamingToolsViewModel @Inject constructor(
     private val audioBoostController: AudioBoostController,
     private val keepAliveStore: KeepAliveStore,
     private val crosshairPositionStore: CrosshairPositionStore,
+    private val cleanerPatternStore: CleanerPatternStore,
     private val backgroundDataRestrictor: BackgroundDataRestrictor,
     private val vpnFirewall: VpnFirewall,
     private val dnsFeature: DnsFeature,
     /** Shared with spoof profiles so both features quote the same display numbers. */
-    private val displayMetrics: DisplayMetricsProvider
+    private val displayMetrics: DisplayMetricsProvider,
+    private val dexoptScheduleStore: DexoptScheduleStore,
+    private val dexoptSweepScheduler: DexoptSweepScheduler
 ) : ViewModel() {
 
     data class UiState(
@@ -139,6 +146,13 @@ class GamingToolsViewModel @Inject constructor(
         /** Last junk scan, including what it could not reach. null until the first scan runs. */
         val scanReport: CleaningFeature.ScanReport? = null,
         val showAggressiveCleanWarning: Boolean = false,
+        /**
+         * The user's own keep entries — paths or bare names the scan must never claim. Read at
+         * construction so the editor shows the persisted truth rather than a blank it invented.
+         */
+        val cleanerKeepEntries: Set<String> = emptySet(),
+        /** The user's own clean patterns (regex text matched against the whole path). */
+        val cleanerCleanPatterns: Set<String> = emptySet(),
         val isAutoForceStopActive: Boolean = false,
         /**
          * The apps the user chose to *keep* running — Auto Force Stop closes every other app you
@@ -170,7 +184,18 @@ class GamingToolsViewModel @Inject constructor(
         val isApplyingResolution: Boolean = false,
         val resLog: List<String> = emptyList(),
         /** Set while a risky-but-legal change is waiting for confirmation; carries the real reason. */
-        val resWarning: String? = null
+        val resWarning: String? = null,
+
+        // Scheduled dexopt sweep
+        /** Whether the recurring ART sweep is enrolled in WorkManager. */
+        val dexoptScheduleEnabled: Boolean = false,
+        /** Hours between scheduled runs — one of [DexoptScheduleStore.INTERVAL_CHOICES]. */
+        val dexoptIntervalHours: Int = DexoptScheduleStore.DEFAULT_INTERVAL_HOURS,
+        /**
+         * When WorkManager itself expects the next run, or null when nothing is scheduled or it
+         * could not be read. An estimate, not a promise — Doze defers background work.
+         */
+        val dexoptNextRunAt: Long? = null
     ) {
         /**
          * Whether the width/height/DPI fields accept typing.
@@ -194,6 +219,7 @@ class GamingToolsViewModel @Inject constructor(
     val isFixedPerformanceMode = gamingEngine.isFixedPerformanceMode
     val boosterLog = gamingEngine.boosterLog
     val boosterState = gamingEngine.boosterState
+    val boosterHistory = gamingEngine.boosterHistory
     val animationScales = gamingEngine.animationScales
     val alwaysFinishActivities = gamingEngine.alwaysFinishActivities
     val backgroundProcessLimit = gamingEngine.backgroundProcessLimit
@@ -242,9 +268,17 @@ class GamingToolsViewModel @Inject constructor(
                 selectedCrosshair = appPrefs.getString("selected_scope", "scope2.png") ?: "scope2.png",
                 isCrosshairOffCentre = crosshairPositionStore.isOffCentre,
                 boostLevel = appPrefs.getInt("boost_level", 0),
-                autoForceStopKeepPackages = keepAliveStore.getKeptPackages()
+                autoForceStopKeepPackages = keepAliveStore.getKeptPackages(),
+                dexoptScheduleEnabled = dexoptScheduleStore.isEnabled(),
+                dexoptIntervalHours = dexoptScheduleStore.getIntervalHours(),
+                cleanerKeepEntries = cleanerPatternStore.getKeepEntries(),
+                cleanerCleanPatterns = cleanerPatternStore.getCleanPatterns()
             )
         }
+        // WorkManager persists periodic work across reboots and app updates, so the schedule may
+        // exist from a previous session even though nothing re-enrolled it this launch — the
+        // next-run estimate is read from WorkManager, not assumed from the switch.
+        viewModelScope.launch { refreshDexoptScheduleState() }
         audioBoostController.applyBoost(_uiState.value.boostLevel)
 
         val filter = IntentFilter().apply {
@@ -287,7 +321,6 @@ class GamingToolsViewModel @Inject constructor(
         try {
             context.unregisterReceiver(serviceStateReceiver)
         } catch (_: Exception) {}
-        super.onCleared()
     }
 
     // ---- Privilege / Shizuku ----
@@ -512,7 +545,7 @@ class GamingToolsViewModel @Inject constructor(
                 _uiState.update { it.copy(isChangingVpnFirewall = true) }
                 vpnFirewall.stop()
                 _uiState.update { it.copy(isChangingVpnFirewall = false) }
-                _toasts.tryEmit("Other apps can use the internet again")
+                _toasts.tryEmit(context.getString(R.string.gt_vm_vpn_unblocked))
                 return@launch
             }
             when (val consent = vpnFirewall.consent()) {
@@ -524,7 +557,7 @@ class GamingToolsViewModel @Inject constructor(
                     // Not the same as "you have not agreed": we could not ask. Say so instead of
                     // showing a dialog we do not have or claiming consent we never confirmed.
                     _toasts.tryEmit(
-                        "Android would not say whether the VPN is allowed (${consent.reason})"
+                        context.getString(R.string.gt_vm_vpn_unknown, consent.reason)
                     )
                     return@launch
                 }
@@ -548,7 +581,7 @@ class GamingToolsViewModel @Inject constructor(
     fun onVpnConsentResult(granted: Boolean) {
         _uiState.update { it.copy(vpnConsentRequest = false) }
         if (!granted) {
-            _toasts.tryEmit("You said no, so nothing is blocked")
+            _toasts.tryEmit(context.getString(R.string.gt_vm_vpn_no))
             return
         }
         viewModelScope.launch { startVpnFirewall() }
@@ -654,7 +687,14 @@ class GamingToolsViewModel @Inject constructor(
         _uiState.update { it.copy(cleanResult = null, scanReport = null, isScanningJunk = true) }
         scanJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                val report = CleaningFeature.scan(context, shellRunner)
+                // The user's own keep/clean rules are read at scan start, so a rule added after
+                // this point lands in the next scan rather than half-applying to this one.
+                val report = CleaningFeature.scan(
+                    context,
+                    shellRunner,
+                    cleanerPatternStore.getKeepEntries(),
+                    cleanerPatternStore.getCleanPatterns()
+                )
                 withContext(Dispatchers.Main) {
                     _uiState.update { it.copy(scanReport = report) }
                 }
@@ -662,17 +702,17 @@ class GamingToolsViewModel @Inject constructor(
                 // sweep and an empty result because storage was unreachable are different facts.
                 _toasts.tryEmit(
                     when {
-                        !report.scannedAnything -> "Could not look through your storage — see the notes below"
-                        report.results.isEmpty() -> "All done: nothing to clean"
+                        !report.scannedAnything -> context.getString(R.string.gt_vm_scan_denied)
+                        report.results.isEmpty() -> context.getString(R.string.gt_vm_scan_empty)
                         // Empty files and folders are found items that free no bytes; leading with
                         // the size would report them as nothing at all.
-                        report.totalBytes == 0L -> "Found ${report.totalItems} empty things — they take up no space"
-                        else -> "Found ${formatBytes(report.totalBytes)} in ${report.totalItems} things"
+                        report.totalBytes == 0L -> context.getString(R.string.gt_vm_scan_empty_items, report.totalItems)
+                        else -> context.getString(R.string.gt_vm_scan_found, formatBytes(report.totalBytes), report.totalItems)
                     }
                 )
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                _toasts.tryEmit("Could not finish looking: ${e.message ?: "something went wrong"}")
+                _toasts.tryEmit(context.getString(R.string.gt_vm_scan_fail, e.message ?: context.getString(R.string.gt_vm_something_wrong)))
             } finally {
                 // Not a suspend call, so it still runs after cancellation.
                 _uiState.update { it.copy(isScanningJunk = false) }
@@ -705,12 +745,12 @@ class GamingToolsViewModel @Inject constructor(
         if (cleanJob?.isActive == true) return
         val report = _uiState.value.scanReport
         if (report == null) {
-            _toasts.tryEmit("Press Scan first, so there is something to clean")
+            _toasts.tryEmit(context.getString(R.string.gt_vm_scan_first))
             return
         }
         val resultsToClean = report.results.filter { it.category in categories }
         if (resultsToClean.isEmpty()) {
-            _toasts.tryEmit("Nothing was found in what you ticked")
+            _toasts.tryEmit(context.getString(R.string.gt_vm_clean_none_ticked))
             return
         }
         _uiState.update { it.copy(isCleaningJunk = true, cleanResult = null) }
@@ -733,11 +773,51 @@ class GamingToolsViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                _toasts.tryEmit("Could not finish cleaning: ${e.message ?: "something went wrong"}")
+                _toasts.tryEmit(context.getString(R.string.gt_vm_clean_fail, e.message ?: context.getString(R.string.gt_vm_something_wrong)))
             } finally {
                 _uiState.update { it.copy(isCleaningJunk = false) }
             }
         }
+    }
+
+    // ---- Cleaner user rules ----
+
+    /**
+     * Adds a keep entry (an absolute path or a bare file name the scan must never claim).
+     *
+     * A rule change does not retro-edit the last scan's report — it applies from the next scan,
+     * so what the list on screen shows stays exactly what that scan measured.
+     */
+    fun addCleanerKeepEntry(entry: String) {
+        val trimmed = entry.trim()
+        if (trimmed.isEmpty()) return
+        cleanerPatternStore.addKeepEntry(trimmed)
+        _uiState.update { it.copy(cleanerKeepEntries = cleanerPatternStore.getKeepEntries()) }
+        _toasts.tryEmit(context.getString(R.string.gt_vm_keep_will))
+    }
+
+    fun removeCleanerKeepEntry(entry: String) {
+        cleanerPatternStore.removeKeepEntry(entry)
+        _uiState.update { it.copy(cleanerKeepEntries = cleanerPatternStore.getKeepEntries()) }
+    }
+
+    /**
+     * Adds a clean pattern (regular-expression text matched against the whole path). Rejected
+     * with a toast when the text is not a valid regex, so storage never holds a pattern that
+     * would make every future scan throw.
+     */
+    fun addCleanerCleanPattern(pattern: String) {
+        if (cleanerPatternStore.addCleanPattern(pattern) == null) {
+            _toasts.tryEmit(context.getString(R.string.gt_vm_pattern_bad))
+            return
+        }
+        _uiState.update { it.copy(cleanerCleanPatterns = cleanerPatternStore.getCleanPatterns()) }
+        _toasts.tryEmit(context.getString(R.string.gt_vm_pattern_will))
+    }
+
+    fun removeCleanerCleanPattern(pattern: String) {
+        cleanerPatternStore.removeCleanPattern(pattern)
+        _uiState.update { it.copy(cleanerCleanPatterns = cleanerPatternStore.getCleanPatterns()) }
     }
 
     // ---- Gaming engine actions ----
@@ -769,8 +849,8 @@ class GamingToolsViewModel @Inject constructor(
         val result = gamingEngine.manualBoostRam()
         val message = when {
             result.freedMb == null ->
-                "RAM Boost: ${result.stoppedCount} app(s) stopped — memory figures unavailable on this device"
-            else -> "RAM Boost: ${result.freedMb} MB freed (${result.stoppedCount} app(s) stopped)"
+                context.getString(R.string.gt_vm_ram_unknown, result.stoppedCount)
+            else -> context.getString(R.string.gt_vm_ram_done, result.freedMb, result.stoppedCount)
         }
         _uiState.update { it.copy(isBoostingRam = false, ramResult = message) }
         _toasts.emit(message)
@@ -787,6 +867,49 @@ class GamingToolsViewModel @Inject constructor(
         // Same launch route as the notification's Stop action: the service posts its notification
         // immediately on either path, which is what a startForegroundService start requires.
         ContextCompat.startForegroundService(context, AppBoosterService.stopIntent(context))
+    }
+
+    /**
+     * Enrolls (or removes) the recurring dexopt sweep. WorkManager, not the switch, decides
+     * whether the schedule exists afterwards — the state published here includes the next-run
+     * estimate it answers with, so a refused enrollment shows as "not scheduled" rather than a
+     * switch that flipped and did nothing.
+     */
+    fun setDexoptSchedule(enabled: Boolean) = viewModelScope.launch {
+        dexoptScheduleStore.setEnabled(enabled)
+        dexoptSweepScheduler.apply(dexoptScheduleStore)
+        refreshDexoptScheduleState()
+        _toasts.emit(
+            if (enabled && _uiState.value.dexoptNextRunAt != null) {
+                context.getString(R.string.gt_vm_sched_on, dexoptScheduleStore.getIntervalHours())
+            } else if (enabled) {
+                context.getString(R.string.gt_vm_sched_on_unknown)
+            } else {
+                context.getString(R.string.gt_vm_sched_off)
+            }
+        )
+    }
+
+    /**
+     * Changes the interval of an existing schedule without restarting its countdown
+     * (ExistingPeriodicWorkPolicy.UPDATE — see [DexoptSweepScheduler]).
+     */
+    fun setDexoptInterval(hours: Int) = viewModelScope.launch {
+        dexoptScheduleStore.setIntervalHours(hours)
+        // Re-apply even when disabled, so the stored interval is what the next enable uses.
+        dexoptSweepScheduler.apply(dexoptScheduleStore)
+        refreshDexoptScheduleState()
+    }
+
+    private suspend fun refreshDexoptScheduleState() {
+        val next = dexoptSweepScheduler.nextScheduledRunAt()
+        _uiState.update {
+            it.copy(
+                dexoptScheduleEnabled = dexoptScheduleStore.isEnabled(),
+                dexoptIntervalHours = dexoptScheduleStore.getIntervalHours(),
+                dexoptNextRunAt = next
+            )
+        }
     }
 
     // Only the governor lock. Refresh rate and touch response belong to gaming mode, which
@@ -811,15 +934,24 @@ class GamingToolsViewModel @Inject constructor(
      */
     fun setAnimationScale(scale: AnimationScaleKind, value: Float) = viewModelScope.launch {
         if (gamingEngine.setAnimationScale(scale, value)) {
-            _toasts.tryEmit("${scale.label}: ${formatScale(value)}")
+            _toasts.tryEmit(context.getString(R.string.gt_vm_scale_set, animationScaleLabel(scale), formatScale(value)))
         } else {
-            _toasts.tryEmit("${scale.label} could not be changed${animationScaleBlockReason()}")
+            _toasts.tryEmit(context.getString(R.string.gt_vm_scale_fail, animationScaleLabel(scale), animationScaleBlockReason()))
         }
     }
 
+    /** Localized animation-scale name. The engine enum keeps the `Settings.Global` keys. */
+    private fun animationScaleLabel(scale: AnimationScaleKind): String = context.getString(
+        when (scale) {
+            AnimationScaleKind.WINDOW -> R.string.gt_vm_anim_window
+            AnimationScaleKind.TRANSITION -> R.string.gt_vm_anim_transition
+            AnimationScaleKind.ANIMATOR -> R.string.gt_vm_anim_animator
+        }
+    )
+
     /** Why a write was refused, when the reason is knowable. Empty when the cause is device-specific. */
     private fun animationScaleBlockReason(): String =
-        if (gamingEngine.canWriteAnimationScales()) "" else " — needs root or Shizuku"
+        if (gamingEngine.canWriteAnimationScales()) "" else context.getString(R.string.gt_vm_scale_need)
 
     /** `0.5x`, `1x`, `10x` — trailing `.0` dropped, as Developer Options labels them. */
     private fun formatScale(value: Float): String =
@@ -843,17 +975,17 @@ class GamingToolsViewModel @Inject constructor(
      */
     fun setShowRefreshRate(enabled: Boolean) = viewModelScope.launch {
         val result = gameDeveloperOptions.setShowRefreshRate(enabled)
-        _toasts.tryEmit(devOptionToast("Show refresh rate", enabled, result))
+        _toasts.tryEmit(devOptionToast(context.getString(R.string.gt_dev_show_rr), enabled, result))
     }
 
     fun setForcePeakRefreshRate(enabled: Boolean) = viewModelScope.launch {
         val result = gameDeveloperOptions.setForcePeakRefreshRate(enabled)
-        _toasts.tryEmit(devOptionToast("Always use the fastest screen speed", enabled, result))
+        _toasts.tryEmit(devOptionToast(context.getString(R.string.gt_dev_peak), enabled, result))
     }
 
     fun setGameDefaultFrameRateDisabled(enabled: Boolean) = viewModelScope.launch {
         val result = gameDeveloperOptions.setGameDefaultFrameRateDisabled(enabled)
-        _toasts.tryEmit(devOptionToast("Let games run at full speed", enabled, result))
+        _toasts.tryEmit(devOptionToast(context.getString(R.string.gt_dev_game_speed), enabled, result))
     }
 
     /** Names the setting and what the device did with it — never a success the read-back denies. */
@@ -862,11 +994,21 @@ class GamingToolsViewModel @Inject constructor(
         requested: Boolean,
         state: GameDeveloperOptions.ToggleState
     ): String = when {
-        state.enabled == requested -> "$label: ${if (requested) "on" else "off"}"
+        state.enabled == requested -> context.getString(
+            if (requested) R.string.gt_vm_dev_on else R.string.gt_vm_dev_off, label
+        )
         state.enabled == null ->
-            "$label — your phone would not say what happened${state.unavailableReason?.let { " ($it)" }.orEmpty()}"
+            context.getString(
+                R.string.gt_vm_dev_unknown,
+                label,
+                state.unavailableReason?.let { context.getString(R.string.gt_vm_dev_unknown_reason, it) }.orEmpty()
+            )
         else ->
-            "$label could not be changed${state.unavailableReason?.let { " — $it" }.orEmpty()}"
+            context.getString(
+                R.string.gt_vm_dev_fail,
+                label,
+                state.unavailableReason?.let { context.getString(R.string.gt_vm_dev_fail_reason, it) }.orEmpty()
+            )
     }
 
     fun toggleAutoForceStop(enabled: Boolean) {
@@ -891,14 +1033,14 @@ class GamingToolsViewModel @Inject constructor(
     fun launchGame(pkg: String) = viewModelScope.launch {
         val intent = context.packageManager.getLaunchIntentForPackage(pkg)
         if (intent == null) {
-            _toasts.tryEmit("This app cannot be opened from here")
+            _toasts.tryEmit(context.getString(R.string.gt_vm_cannot_open))
             return@launch
         }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             context.startActivity(intent)
         } catch (e: Exception) {
-            _toasts.tryEmit("Could not open it: ${e.message ?: e.javaClass.simpleName}")
+            _toasts.tryEmit(context.getString(R.string.gt_vm_open_fail, e.message ?: e.javaClass.simpleName))
         }
     }
 
@@ -1026,11 +1168,11 @@ class GamingToolsViewModel @Inject constructor(
             if (percent != 100 && target.isSameSizeAndDensity(native)) return@mapNotNull null
             ResolutionOption(
                 id = "scale_$percent",
-                label = if (percent == 100) "Native" else "$percent%",
+                label = if (percent == 100) context.getString(R.string.gt_vm_res_native) else "$percent%",
                 target = target
             )
         }
-        return scalings + ResolutionOption(CUSTOM_OPTION_ID, "Custom", null)
+        return scalings + ResolutionOption(CUSTOM_OPTION_ID, context.getString(R.string.gt_vm_res_custom), null)
     }
 
     /**
@@ -1050,22 +1192,28 @@ class GamingToolsViewModel @Inject constructor(
         val dpi = state.dpiInput.trim().toIntOrNull()
 
         if (state.widthInput.isBlank() || state.heightInput.isBlank() || state.dpiInput.isBlank()) {
-            return "Fill in all three numbers"
+            return context.getString(R.string.gt_vm_res_fill)
         }
-        if (width == null || height == null || dpi == null) return "Use whole numbers only"
+        if (width == null || height == null || dpi == null) return context.getString(R.string.gt_vm_res_whole)
 
         val min = DisplayMetricsProvider.MIN_DIMENSION_PX
-        if (width < min || height < min) return "Width and height must be at least $min"
+        if (width < min || height < min) return context.getString(R.string.gt_vm_res_min, min)
         if (dpi < DisplayMetricsProvider.MIN_DENSITY_DPI || dpi > DisplayMetricsProvider.MAX_DENSITY_DPI) {
-            return "DPI has to be between ${DisplayMetricsProvider.MIN_DENSITY_DPI} and " +
-                "${DisplayMetricsProvider.MAX_DENSITY_DPI} — your phone will not take anything else"
+            return context.getString(
+                R.string.gt_vm_res_dpi,
+                DisplayMetricsProvider.MIN_DENSITY_DPI,
+                DisplayMetricsProvider.MAX_DENSITY_DPI
+            )
         }
         if (native != null && native.isValid) {
             val maxWidth = native.widthPixels * MAX_SUPERSAMPLE_FACTOR
             val maxHeight = native.heightPixels * MAX_SUPERSAMPLE_FACTOR
             if (width > maxWidth || height > maxHeight) {
-                return "Too big — more than ${MAX_SUPERSAMPLE_FACTOR}× your screen's own " +
-                    "${native.sizeLabel}, which your phone cannot draw"
+                return context.getString(
+                    R.string.gt_vm_res_big,
+                    MAX_SUPERSAMPLE_FACTOR,
+                    native.sizeLabel
+                )
             }
         }
         return null
@@ -1083,7 +1231,7 @@ class GamingToolsViewModel @Inject constructor(
         val error = validateResInputs(state)
         if (error != null) {
             _uiState.update { it.copy(resValidationError = error) }
-            logRes("Not changed: $error")
+            logRes(context.getString(R.string.gt_vm_res_not_changed, error))
             return
         }
         val target = DisplayMetricsProvider.Snapshot(
@@ -1107,23 +1255,17 @@ class GamingToolsViewModel @Inject constructor(
         native: DisplayMetricsProvider.Snapshot?
     ): String? {
         if (native == null || !native.isValid) {
-            return "Your phone would not say what its real screen size is, so ${target.label} cannot " +
-                "be checked against it. A size your screen cannot do may leave it unreadable until " +
-                "you press Reset."
+            return context.getString(R.string.gt_vm_res_warn_unknown, target.label)
         }
         val nativeAspect = maxOf(native.widthPixels, native.heightPixels).toFloat() /
             minOf(native.widthPixels, native.heightPixels)
         val targetAspect = maxOf(target.widthPixels, target.heightPixels).toFloat() /
             minOf(target.widthPixels, target.heightPixels)
         if (abs(targetAspect - nativeAspect) / nativeAspect > MAX_ASPECT_DRIFT) {
-            return "${target.sizeLabel} is a different shape from your screen (${native.sizeLabel}), " +
-                "so the picture will look stretched or cut off, and some buttons may end up off the " +
-                "edge. Use it anyway?"
+            return context.getString(R.string.gt_vm_res_warn_shape, target.sizeLabel, native.sizeLabel)
         }
         if (target.widthPixels > native.widthPixels || target.heightPixels > native.heightPixels) {
-            return "${target.sizeLabel} is bigger than your screen's ${native.sizeLabel}. Your phone " +
-                "will draw more than it can show and then shrink it back down, which uses more " +
-                "battery for no extra detail. Use it anyway?"
+            return context.getString(R.string.gt_vm_res_warn_bigger, target.sizeLabel, native.sizeLabel)
         }
         return null
     }
@@ -1137,7 +1279,7 @@ class GamingToolsViewModel @Inject constructor(
     fun dismissResWarning() {
         _uiState.update { it.copy(resWarning = null) }
         pendingResApply = null
-        logRes("Cancelled")
+        logRes(context.getString(R.string.gt_vm_res_cancelled))
     }
 
     fun resetResolutionChanges() {
@@ -1150,19 +1292,19 @@ class GamingToolsViewModel @Inject constructor(
             val density = shellRunner.execSafeResult("wm", "density", "reset")
             _uiState.update { it.copy(isApplyingResolution = false) }
 
-            if (!size.isSuccess) logRes("Could not put the size back${failureDetail(size)}")
-            if (!density.isSuccess) logRes("Could not put the sharpness back${failureDetail(density)}")
+            if (!size.isSuccess) logRes(context.getString(R.string.gt_vm_res_size_fail, failureDetail(size)))
+            if (!density.isSuccess) logRes(context.getString(R.string.gt_vm_res_density_fail, failureDetail(density)))
 
             refreshResolutionState()
             val after = readWmState()
             when {
                 after == null ->
                     if (size.isSuccess && density.isSuccess) {
-                        logRes("Reset — your phone would not confirm it, though")
+                        logRes(context.getString(R.string.gt_vm_res_reset_unconfirmed))
                     }
                 after.override == null ->
-                    logRes("Reset — back to ${after.physical?.label ?: "your screen's own size"}")
-                else -> logRes("Still changed: ${after.override.label}")
+                    logRes(context.getString(R.string.gt_vm_res_reset_done, after.physical?.label ?: context.getString(R.string.gt_vm_res_reset_native)))
+                else -> logRes(context.getString(R.string.gt_vm_res_still, after.override.label))
             }
         }
     }
@@ -1181,12 +1323,12 @@ class GamingToolsViewModel @Inject constructor(
             _uiState.update { it.copy(isApplyingResolution = false) }
 
             if (!size.isSuccess) {
-                logRes("Could not change the size${failureDetail(size)}")
+                logRes(context.getString(R.string.gt_vm_res_size_only_fail, failureDetail(size)))
                 refreshResolutionState()
                 return@launch
             }
             if (density != null && !density.isSuccess) {
-                logRes("Size changed, but the sharpness did not${failureDetail(density)}")
+                logRes(context.getString(R.string.gt_vm_res_density_partial, failureDetail(density)))
             }
 
             refreshResolutionState()
@@ -1194,9 +1336,9 @@ class GamingToolsViewModel @Inject constructor(
             val after = readWmState()
             val applied = after?.override ?: after?.physical
             when {
-                applied == null -> logRes("Set to ${target.label} — your phone would not confirm it, though")
-                applied.isSameSizeAndDensity(target) -> logRes("Set to ${target.label}")
-                else -> logRes("Asked for ${target.label} but your phone is showing ${applied.label}")
+                applied == null -> logRes(context.getString(R.string.gt_vm_res_set_unconfirmed, target.label))
+                applied.isSameSizeAndDensity(target) -> logRes(context.getString(R.string.gt_vm_res_set_done, target.label))
+                else -> logRes(context.getString(R.string.gt_vm_res_mismatch, target.label, applied.label))
             }
         }
     }
@@ -1205,8 +1347,8 @@ class GamingToolsViewModel @Inject constructor(
     private suspend fun requirePrivilegeForResolution(): Boolean {
         val privileged = withContext(Dispatchers.IO) { shellRunner.hasPrivilege() }
         if (!privileged) {
-            logRes("Needs root or Shizuku. Android does not let a normal app resize the screen.")
-            _toasts.tryEmit("Changing the screen size needs root or Shizuku")
+            logRes(context.getString(R.string.gt_vm_res_log_priv))
+            _toasts.tryEmit(context.getString(R.string.gt_vm_res_need))
         }
         return privileged
     }
@@ -1253,7 +1395,9 @@ class GamingToolsViewModel @Inject constructor(
     }
 
     private fun failureDetail(result: ShellRunner.ExecResult): String =
-        result.text.takeIf { it.isNotBlank() }?.let { ": ${it.lineSequence().first().trim()}" }.orEmpty()
+        result.text.takeIf { it.isNotBlank() }
+            ?.let { context.getString(R.string.gt_vm_res_fail_detail, it.lineSequence().first().trim()) }
+            .orEmpty()
 
     private fun logRes(m: String) {
         val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())

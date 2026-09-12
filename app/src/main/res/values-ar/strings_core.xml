@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Core dashboard / navigation strings (feature: main, about, logs, permissions, startup). -->
+    <!-- Back-press exit toast (%1$d = remaining taps). -->
+    <string name="core_exit_tap">انقر %1$d مرات أخرى للخروج</string>
+
+    <!-- Dashboard metric abbreviations (kept short in every locale). -->
+    <string name="core_metric_cpu">CPU</string>
+    <string name="core_metric_ram">RAM</string>
+    <string name="core_metric_soc">SOC</string>
+    <string name="core_metric_temp">TEMP</string>
+    <string name="core_metric_ping">PING</string>
+
+    <!-- Compact fallback labels shown in place of a missing dashboard reading. -->
+    <string name="core_compact_loading">…</string>
+    <string name="core_compact_privilege">root?</string>
+    <string name="core_compact_unsupported">n/s</string>
+    <string name="core_compact_na">N/A</string>
+
+    <!-- Dashboard Settings tile (only tile without a shared entry). -->
+    <string name="core_settings_title">الإعدادات</string>
+    <string name="core_settings_subtitle">الضبط والتفضيلات</string>
+
+    <!-- About screen. -->
+    <string name="core_about_subtitle">معلومات التطبيق والمجتمع.</string>
+    <string name="core_about_description">CatSmoker أداة أداء مفتوحة المصدر لنظام Android. مهمتنا هي منح اللاعبين أفضل تجربة ممكنة من خلال تحسين موارد النظام وإطلاق الإمكانات الخفية.</string>
+
+    <!-- Logs screen ViewModel messages (%1$s = detail). -->
+    <string name="core_logs_fetch_error">تعذر جلب السجلات: %1$s</string>
+    <string name="core_logs_share_title">مشاركة السجلات</string>
+
+    <!-- Shared scaffold back button (talkback). -->
+    <string name="core_back">رجوع</string>
+
+    <!-- Onboarding terms step. Prefix/suffix carry their edge space via \u0020. -->
+    <string name="core_terms_prefix">يرجى قراءة\u0020</string>
+    <string name="core_terms_link">الشروط والأحكام</string>
+    <string name="core_terms_suffix">\u0020قبل استخدام التطبيق.</string>
+    <string name="core_terms_title">شروط الخدمة</string>
+    <string name="core_terms_agree">أوافق على الشروط.</string>
+    <string name="core_continue">متابعة</string>
+
+    <!-- Permissions screen. -->
+    <string name="core_permissions_title">الأذونات</string>
+    <string name="core_permissions_subtitle">امنح الأذونات لتفعيل جميع الميزات.</string>
+    <string name="core_perm_root_title">وصول الجذر</string>
+    <string name="core_perm_root_sub">مطلوب لتحسينات متقدمة.</string>
+    <string name="core_perm_shizuku_title">وصول Shizuku</string>
+    <string name="core_perm_shizuku_sub">بديل للجذر لتعديلات النظام.</string>
+    <string name="core_perm_storage_title">الوصول إلى التخزين</string>
+    <string name="core_perm_storage_sub">لقراءة ملفات إعدادات الألعاب وتعديلها.</string>
+    <string name="core_perm_battery_title">تحسين البطارية</string>
+    <string name="core_perm_battery_sub">للسماح للتطبيق بالعمل بسلاسة في الخلفية.</string>
+    <string name="core_perm_notif_title">الإشعارات</string>
+    <string name="core_perm_notif_sub">لعرض حالة الخدمة.</string>
+    <string name="core_perm_overlay_title">التراكب</string>
+    <string name="core_perm_overlay_sub">لعرض مراقبي الأداء.</string>
+    <string name="core_perm_usage_title">إحصاءات الاستخدام</string>
+    <string name="core_perm_usage_sub">لتتبع وقت اللعب.</string>
+    <string name="core_perm_mic_title">الميكروفون</string>
+    <string name="core_perm_mic_sub">مطلوب لميزات تعزيز الصوت.</string>
+    <string name="core_perm_bt_title">البلوتوث</string>
+    <string name="core_perm_bt_sub">مطلوب لتحسينات وحدات التحكم وسماعات الرأس.</string>
+    <string name="core_done">تم</string>
+    <string name="core_grant">منح</string>
+    <!-- MetricReadStatus full labels: the reason shown in place of a value on the dashboard
+         and in the performance overlay, when the device never reported a number. -->
+    <string name="core_read_loading">جارٍ القراءة…</string>
+    <string name="core_read_ok">تم</string>
+    <string name="core_read_empty">لا بيانات</string>
+    <string name="core_read_parse">غير مقروء</string>
+    <string name="core_read_privilege">يتطلب روت أو Shizuku</string>
+    <string name="core_read_unsupported">غير مدعوم</string>
+</resources>

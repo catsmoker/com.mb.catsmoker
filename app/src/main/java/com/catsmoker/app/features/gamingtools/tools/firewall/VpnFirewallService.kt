@@ -61,15 +61,15 @@ class VpnFirewallService : VpnService() {
         val targets = firewall.consumeBlockList()
         if (targets.isEmpty()) {
             // Establishing with nothing allowed would route the entire device into a dead interface.
-            firewall.onFailed("No apps to block, so the VPN was not started")
+            firewall.onFailed(getString(R.string.gt_vpn_fail_empty))
             stopSelf()
             return START_NOT_STICKY
         }
 
-        startForeground(NOTIF_ID, buildNotification("Starting…"))
+        startForeground(NOTIF_ID, buildNotification(getString(R.string.gt_svc_starting)))
 
         val builder = Builder()
-            .setSession("Catsmoker app block")
+            .setSession(getString(R.string.gt_svc_vpn_session))
             .setMtu(MTU)
             .addAddress(TUN_IPV4, 32)
             .addRoute("0.0.0.0", 0)
@@ -88,7 +88,7 @@ class VpnFirewallService : VpnService() {
             runCatching { builder.addAllowedApplication(pkg) }.onSuccess { accepted++ }
         }
         if (accepted == 0) {
-            firewall.onFailed("Android would not accept any of the apps to block")
+            firewall.onFailed(getString(R.string.gt_vpn_fail_accept))
             stopSelf()
             return START_NOT_STICKY
         }
@@ -101,23 +101,22 @@ class VpnFirewallService : VpnService() {
             builder.establish()
         } catch (e: Exception) {
             // The usual cause is consent having been revoked between the check and this call.
-            firewall.onFailed("Android refused the VPN (${e.javaClass.simpleName})")
+            firewall.onFailed(getString(R.string.gt_vpn_fail_refused, e.javaClass.simpleName))
             stopSelf()
             return START_NOT_STICKY
         }
 
         if (fd == null) {
-            firewall.onFailed("Android did not create the VPN interface")
+            firewall.onFailed(getString(R.string.gt_vpn_fail_interface))
             stopSelf()
             return START_NOT_STICKY
         }
 
         tunnel = fd
         firewall.onEstablished(accepted)
-        val note = buildString {
-            append("Blocking $accepted app(s)")
-            if (!ipv6) append(" · IPv4 only on this device")
-        }
+        val ipv6Failed = !ipv6
+        val note = getString(R.string.gt_svc_vpn_blocking, accepted) +
+            if (ipv6Failed) getString(R.string.gt_svc_vpn_ipv4) else ""
         updateNotification(note)
         return START_STICKY
     }
@@ -135,7 +134,7 @@ class VpnFirewallService : VpnService() {
      * leaving the switch on would be claiming a block that no longer exists.
      */
     override fun onRevoke() {
-        firewall.onFailed("Another VPN app took over, or you revoked VPN permission")
+        firewall.onFailed(getString(R.string.gt_vpn_fail_revoke))
         tunnel = null
         stopSelf()
         super.onRevoke()
@@ -153,7 +152,7 @@ class VpnFirewallService : VpnService() {
     private fun createNotificationChannel() {
         val nm = getSystemService(NotificationManager::class.java) ?: return
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "App network block", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CHANNEL_ID, getString(R.string.gt_svc_vpn_channel), NotificationManager.IMPORTANCE_LOW)
         )
     }
 
@@ -164,7 +163,7 @@ class VpnFirewallService : VpnService() {
 
     private fun buildNotification(text: String): android.app.Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("App network block")
+            .setContentTitle(getString(R.string.gt_svc_vpn_title))
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setSmallIcon(R.mipmap.ic_launcher)

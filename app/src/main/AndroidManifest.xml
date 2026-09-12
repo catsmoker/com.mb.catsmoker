@@ -8,6 +8,27 @@
         <package android:name="com.topjohnwu.magisk" />
         <package android:name="me.weishu.kernelsu" />
         <package android:name="me.bmax.apatch" />
+        <!--
+            The games whose install state the File Engineering screen probes with
+            PackageManager.getPackageInfo. The blanket MAIN/GAME intent below made them
+            visible in practice, but visibility by intent-match is implicit; a stricter
+            OEM filter would turn a real install into a silent NameNotFoundException and
+            a false "not installed" dot. Naming the packages makes the probe's world
+            explicit: Genshin + five PUBG variants, GRID, WuWa, five HSR variants.
+        -->
+        <package android:name="com.miHoYo.GenshinImpact" />
+        <package android:name="com.tencent.ig" />
+        <package android:name="com.pubg.krmobile" />
+        <package android:name="com.vng.pubgmobile" />
+        <package android:name="com.pubg.imobile" />
+        <package android:name="com.rekoo.pubgm" />
+        <package android:name="com.feralinteractive.gridas" />
+        <package android:name="com.kurogame.wutheringwaves.global" />
+        <package android:name="com.HoYoverse.hkrpgoversea" />
+        <package android:name="com.miHoYo.hkrpg" />
+        <package android:name="com.HoYoverse.hkrpg" />
+        <package android:name="com.cognosphere.hkrpg" />
+        <package android:name="com.HoYoverse.hkrpgsamsung" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
         </intent>
@@ -48,6 +69,8 @@
     -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Needed by the overlay boot receiver: without the declaration, BOOT_COMPLETED is never delivered. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
     <application
@@ -58,6 +81,7 @@
         android:requestLegacyExternalStorage="true"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
+        android:localeConfig="@xml/locales_config"
         android:theme="@style/Theme.Catsmoker">
 
         <meta-data android:name="xposedmodule" android:value="true" />
@@ -104,6 +128,34 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
 
+        <!--
+            WorkManager on demand: the default initializer is removed so the HiltWorkerFactory in
+            CatsmokerApp constructs @HiltWorker workers. With both present, WorkManager would
+            initialize with the default (no-)factory and DexoptSweepWorker would fail to be created.
+        -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+
+        <!--
+            WorkManager's own foreground service, re-declared so a worker's setForeground() can run
+            as specialUse — the same type and subtype property every other long-running service in
+            this app uses. Without the type, a setForeground on Android 14+ throws.
+        -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="specialUse"
+            tools:node="merge">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Scheduled dexopt sweep" />
+        </service>
+
         <!-- Disable StartApp SDK Auto-Initialization -->
         <provider
             android:name="com.startapp.sdk.adsbase.StartAppInitProvider"
@@ -126,6 +178,21 @@
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Performance Overlay" />
         </service>
 
+        <!--
+            Restarts the performance overlay after a reboot or an app update, but only when the
+            user had it running — the decision comes from a persisted flag the service itself
+            writes, not from in-process state that resets on every boot.
+        -->
+        <receiver
+            android:name=".features.gamingtools.tools.overlay.OverlayBootReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <service
             android:name=".features.gamingtools.tools.booster.AppBoosterService"
             android:enabled="true"
@@ -133,6 +200,16 @@
             android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Booster" />
         </service>
+
+        <!--
+            The Stop action on the scheduled dexopt sweep's notification. It cancels the sweep the
+            engine is running, not the schedule itself — cancelling the unique work name would take
+            the recurring schedule down with the run, which is not what a Stop button promises.
+        -->
+        <receiver
+            android:name=".features.gamingtools.tools.booster.DexoptSweepStopReceiver"
+            android:enabled="true"
+            android:exported="false" />
 
         <service
             android:name=".features.gamingtools.tools.forcestop.AutoForceStopService"
@@ -148,6 +225,23 @@
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Gaming Mode" />
+        </service>
+
+        <!--
+            Second-layer notification suppression while Gaming Mode is on. BIND_NOTIFICATION_
+            LISTENER_SERVICE is enforced by the system, so it is declared on the service rather
+            than requested at install: only Android itself may bind here, and only after the
+            user grants notification access in Settings. Until that grant this service is inert
+            and Gaming Mode reports the layer as not applicable.
+        -->
+        <service
+            android:name=".features.gamingtools.engine.GamingNotificationListener"
+            android:enabled="true"
+            android:exported="false"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
         </service>
 
         <!--

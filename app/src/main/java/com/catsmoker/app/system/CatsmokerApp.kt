@@ -1,8 +1,13 @@
 package com.catsmoker.app.system
 
 import android.app.Application
+import android.content.Context
+import androidx.hilt.work.HiltWorkerFactory
+import androidx.work.Configuration
 import com.catsmoker.app.BuildConfig
 import com.catsmoker.app.features.main.engine.MetricsEngine
+import com.catsmoker.app.system.config.AppearanceStore
+import com.catsmoker.app.system.config.LocaleHelper
 import com.catsmoker.app.system.shell.ShellRunner
 import com.startapp.sdk.adsbase.StartAppSDK
 import com.topjohnwu.superuser.Shell
@@ -15,8 +20,15 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.time.Duration.Companion.milliseconds
 
+/**
+ * Also WorkManager's [Configuration.Provider]: the default initializer is removed in the manifest
+ * (see there for why), so this is the only place WorkManager can learn how to construct
+ * `@HiltWorker` workers. It deliberately constructs the [Configuration] lazily per read rather
+ * than in onCreate — WorkManager may not be touched until the first scheduled-work enqueue, long
+ * after startup, and the factory is field-injected by then either way.
+ */
 @HiltAndroidApp
-class CatsmokerApp : Application() {
+class CatsmokerApp : Application(), Configuration.Provider {
 
     @Inject
     lateinit var shellRunner: dagger.Lazy<ShellRunner>
@@ -24,7 +36,23 @@ class CatsmokerApp : Application() {
     @Inject
     lateinit var metricsEngine: dagger.Lazy<MetricsEngine>
 
+    @Inject
+    lateinit var workerFactory: HiltWorkerFactory
+
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setWorkerFactory(workerFactory)
+            .build()
+
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    override fun attachBaseContext(base: Context) {
+        // Saved language applies to app-context resources too (services, notifications),
+        // and primes the theme flow before any UI reads it.
+        val wrapped = LocaleHelper.wrap(base)
+        super.attachBaseContext(wrapped)
+        AppearanceStore.init(wrapped)
+    }
 
     override fun onCreate() {
         super.onCreate()

@@ -15,6 +15,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.catsmoker.app.R
 import com.catsmoker.app.shared.ui.components.SectionCard
 
 /**
@@ -61,14 +63,14 @@ fun FixedPerformanceModeCard(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Fixed Performance Mode",
+                        text = stringResource(R.string.gt_fp_title),
                         fontWeight = FontWeight.Bold,
-                        color = if (supported) Color.White else Color.Gray,
+                        color = if (supported) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 15.sp
                     )
                     Text(
-                        text = "Keeps your phone at one steady speed.",
-                        color = Color.Gray,
+                        text = stringResource(R.string.gt_fp_sub),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                     )
                 }
@@ -94,8 +96,7 @@ fun FixedPerformanceModeCard(
                         .padding(12.dp)
                 ) {
                     Text(
-                        text = "Your phone is too old for this. Android ${Build.VERSION.RELEASE} " +
-                            "does not have the setting — it arrived in Android 11.",
+                        text = stringResource(R.string.gt_fp_old, Build.VERSION.RELEASE),
                         color = Color(0xFFE57373),
                         fontSize = 11.sp,
                         lineHeight = 15.sp
@@ -105,31 +106,22 @@ fun FixedPerformanceModeCard(
 
             Spacer(modifier = Modifier.height(12.dp))
             CollapsibleExplainer(
-                title = "What is this?",
+                title = stringResource(R.string.gt_explainer_what),
                 lines = listOf(
-                    "Normally your phone speeds up and slows down all the time depending on how busy " +
-                        "it is. This asks it to stay at one steady speed instead.",
-                    "That makes games feel smoother, because the speed stops jumping around. It does " +
-                        "not make your phone faster overall — the steady speed is chosen by the " +
-                        "company that made your phone's chip, and it is often a little below the " +
-                        "fastest it can go.",
-                    "Nothing else changes. Screen speed, touch and background apps are separate " +
-                        "switches."
+                    stringResource(R.string.gt_fp_what_1),
+                    stringResource(R.string.gt_fp_what_2),
+                    stringResource(R.string.gt_fp_what_3)
                 )
             )
 
             Spacer(modifier = Modifier.height(10.dp))
             CollapsibleExplainer(
-                title = "Should I turn it on?",
+                title = stringResource(R.string.gt_fp_should_title),
                 accent = Color(0xFFFFB300),
                 lines = listOf(
-                    "Turn it on for a gaming session, not all day. It uses more battery and makes " +
-                        "your phone warmer, and a hot phone slows itself down anyway.",
-                    "Some phones ignore this setting completely. Android does not tell an app whether " +
-                        "it worked, so this app can only say that your phone accepted the request — " +
-                        "it will not claim more than that.",
-                    "Gaming Mode already asks for this while it is on. This switch is for using it " +
-                        "by itself."
+                    stringResource(R.string.gt_fp_should_1),
+                    stringResource(R.string.gt_fp_should_2),
+                    stringResource(R.string.gt_fp_should_3)
                 )
             )
         }

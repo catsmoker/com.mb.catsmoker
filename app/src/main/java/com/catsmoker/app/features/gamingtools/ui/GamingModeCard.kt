@@ -17,6 +17,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.catsmoker.app.R
 import com.catsmoker.app.features.gamingtools.engine.GamingModeReport
 import com.catsmoker.app.features.gamingtools.engine.GamingModeState
 import com.catsmoker.app.shared.ui.components.SectionCard
@@ -52,30 +54,30 @@ fun GamingModeCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "GAMING MODE",
+                        text = stringResource(R.string.gt_gm_title),
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (isActive) MaterialTheme.colorScheme.primary else Color.Gray,
+                        color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         letterSpacing = 1.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = when (gamingState) {
-                            is GamingModeState.Active -> "System Locked"
+                            is GamingModeState.Active -> stringResource(R.string.gt_gm_active)
                             // The engine already reports which step it is on, so show that rather
                             // than a generic word.
                             is GamingModeState.Enabling -> gamingState.statusText
-                            is GamingModeState.Disabling -> "Reverting…"
-                            is GamingModeState.Error -> "Activation failed"
+                            is GamingModeState.Disabling -> stringResource(R.string.gt_gm_reverting)
+                            is GamingModeState.Error -> stringResource(R.string.gt_gm_failed)
                             is GamingModeState.Idle ->
-                                if (canActivate) "Optimizations Ready" else "Locked"
+                                if (canActivate) stringResource(R.string.gt_gm_ready) else stringResource(R.string.gt_gm_locked)
                         },
                         style = MaterialTheme.typography.titleLarge,
                         color = when {
                             gamingState is GamingModeState.Error -> MaterialTheme.colorScheme.error
                             // Item 8: a feature that cannot run must look like it cannot run.
-                            !canActivate -> Color.Gray
-                            else -> Color.White
+                            !canActivate -> MaterialTheme.colorScheme.onSurfaceVariant
+                            else -> MaterialTheme.colorScheme.onSurface
                         }
                     )
                 }
@@ -88,12 +90,12 @@ fun GamingModeCard(
                         .clip(CircleShape)
                         .background(
                             if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                            else Color.White.copy(alpha = 0.05f)
+                            else MaterialTheme.colorScheme.surfaceVariant
                         )
                         .border(
                             1.dp,
                             if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-                            else Color.White.copy(alpha = 0.1f),
+                            else MaterialTheme.colorScheme.outlineVariant,
                             CircleShape
                         )
                 ) {
@@ -102,8 +104,8 @@ fun GamingModeCard(
                         contentDescription = null,
                         tint = when {
                             isActive -> MaterialTheme.colorScheme.primary
-                            !canActivate -> Color.Gray
-                            else -> Color.White
+                            !canActivate -> MaterialTheme.colorScheme.onSurfaceVariant
+                            else -> MaterialTheme.colorScheme.onSurface
                         },
                         modifier = Modifier.size(28.dp)
                     )
@@ -115,23 +117,16 @@ fun GamingModeCard(
             if (!canActivate) {
                 Spacer(modifier = Modifier.height(16.dp))
                 NoticeBlock(
-                    text = "Needs root or Shizuku.\nEverything Gaming Mode does has to be done by " +
-                        "your phone's system, and Android only lets an app ask for that through root " +
-                        "or Shizuku. Shizuku is a free helper app that lends this app those powers " +
-                        "without root. It turns on by itself once one of them is available.",
+                    text = stringResource(R.string.gt_gm_need),
                     tint = Color(0xFFFFB300)
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 CollapsibleExplainer(
-                    title = "What does Gaming Mode do?",
+                    title = stringResource(R.string.gt_gm_what_title),
                     lines = listOf(
-                        "It gets your phone ready to play in one tap: keeps the screen at its fastest, " +
-                            "pauses other apps, silences notifications, and stops your phone slowing " +
-                            "itself down.",
-                        "It writes down how your phone was set up before it changes anything, so " +
-                            "turning it off puts everything back exactly as it was.",
-                        "Anything your phone refuses is listed on this card as refused. Nothing is " +
-                            "claimed unless your phone confirmed it."
+                        stringResource(R.string.gt_gm_what_1),
+                        stringResource(R.string.gt_gm_what_2),
+                        stringResource(R.string.gt_gm_what_3)
                     )
                 )
             }
@@ -144,7 +139,7 @@ fun GamingModeCard(
                     .fillMaxWidth()
                     .height(8.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.05f))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Box(
                     modifier = Modifier
@@ -174,39 +169,68 @@ fun GamingModeCard(
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     GamingModeResultRow(
                         label = "PowerHAL",
-                        value = if (report.fixedPerformance) "Fixed performance mode" else "Not applied",
+                        value = if (report.fixedPerformance) stringResource(R.string.gt_gm_fixed) else stringResource(R.string.gt_gm_not_applied),
                         applied = report.fixedPerformance
                     )
+                    // Null means the device carries no vendor GPU mode property at all — every
+                    // non-Qualcomm SoC — so the row is omitted rather than shown as refused, the
+                    // same rule as the game frame cap row below.
+                    report.gpuPerformanceMode?.let { applied ->
+                        GamingModeResultRow(
+                            label = stringResource(R.string.gt_gm_label_gpu),
+                            value = if (applied) stringResource(R.string.gt_gm_qc_perf) else stringResource(R.string.gt_gm_not_applied),
+                            applied = applied
+                        )
+                    }
+                    // Same null rule — omitted on non-Qualcomm silicon. The value shown is the
+                    // measured panel peak the hint carries, read back from the property.
+                    report.qtiGameFps?.let { applied ->
+                        GamingModeResultRow(
+                            label = stringResource(R.string.gt_gm_label_fps_hint),
+                            value = if (applied) stringResource(R.string.gt_gm_qc_peak) else stringResource(R.string.gt_gm_not_applied),
+                            applied = applied
+                        )
+                    }
                     GamingModeResultRow(
-                        label = "Display",
-                        value = report.lockedRefreshHz?.let { "Locked $it Hz" } ?: "Rate not locked",
+                        label = stringResource(R.string.gt_gm_label_display),
+                        value = report.lockedRefreshHz?.let { stringResource(R.string.gt_gm_locked_hz, it) } ?: stringResource(R.string.gt_gm_rate_unlocked),
                         applied = report.lockedRefreshHz != null
                     )
                     GamingModeResultRow(
-                        label = "Touch response",
-                        value = if (report.touchResponseBoost) "Boosted" else "Not supported",
+                        label = stringResource(R.string.gt_gm_label_touch),
+                        value = if (report.touchResponseBoost) stringResource(R.string.gt_gm_touch_boost) else stringResource(R.string.gt_gm_touch_na),
                         applied = report.touchResponseBoost
                     )
                     GamingModeResultRow(
-                        label = "Background apps",
+                        label = stringResource(R.string.gt_gm_label_bg_apps),
                         value = when {
                             report.suspendedPackages > 0 && report.suspendFailures > 0 ->
-                                "${report.suspendedPackages} suspended, ${report.suspendFailures} refused"
-                            report.suspendedPackages > 0 -> "${report.suspendedPackages} suspended"
-                            report.suspendFailures > 0 -> "${report.suspendFailures} refused"
-                            else -> "None to suspend"
+                                stringResource(R.string.gt_gm_susp_both, report.suspendedPackages, report.suspendFailures)
+                            report.suspendedPackages > 0 -> stringResource(R.string.gt_gm_susp_some, report.suspendedPackages)
+                            report.suspendFailures > 0 -> stringResource(R.string.gt_gm_susp_refused, report.suspendFailures)
+                            else -> stringResource(R.string.gt_gm_susp_none)
                         },
                         applied = report.suspendedPackages > 0
                     )
                     GamingModeResultRow(
-                        label = "Do Not Disturb",
-                        value = if (report.dndEngaged) "Engaged" else "Off",
+                        label = stringResource(R.string.gt_gm_label_dnd),
+                        value = if (report.dndEngaged) stringResource(R.string.gt_gm_dnd_on) else stringResource(R.string.gt_gm_dnd_off),
                         applied = report.dndEngaged
                     )
+                    // Null means notification access was never granted, so the second layer was
+                    // never switchable on this run — omitted rather than shown as refused, the
+                    // same rule as the background-data row below.
+                    report.notificationSuppression?.let {
+                        GamingModeResultRow(
+                            label = stringResource(R.string.gt_gm_label_notif),
+                            value = if (it) stringResource(R.string.gt_gm_notif_on) else stringResource(R.string.gt_gm_notif_off),
+                            applied = it
+                        )
+                    }
                     report.networkWhitelisted?.let { whitelisted ->
                         GamingModeResultRow(
-                            label = "Game background data",
-                            value = if (whitelisted) "Unrestricted" else "Not whitelisted",
+                            label = stringResource(R.string.gt_gm_label_net),
+                            value = if (whitelisted) stringResource(R.string.gt_gm_net_ok) else stringResource(R.string.gt_gm_net_no),
                             applied = whitelisted
                         )
                     }
@@ -215,31 +239,31 @@ fun GamingModeCard(
                     // refused, exactly like the background-data row above.
                     report.gameInterventionApplied?.let { applied ->
                         GamingModeResultRow(
-                            label = "Game frame cap",
-                            value = if (applied) "Raised to panel peak" else "Not raised",
+                            label = stringResource(R.string.gt_gm_label_cap),
+                            value = if (applied) stringResource(R.string.gt_gm_cap_raised) else stringResource(R.string.gt_gm_cap_no),
                             applied = applied
                         )
                     }
                     // Reported from the read-back of always_finish_activities, so "Applied" means the
                     // setting holds 1 right now rather than that the command was sent.
                     GamingModeResultRow(
-                        label = "Discard activities",
-                        value = if (report.discardActivities) "On" else "Not applied",
+                        label = stringResource(R.string.gt_gm_label_discard),
+                        value = if (report.discardActivities) stringResource(R.string.gt_gm_discard_on) else stringResource(R.string.gt_gm_not_applied),
                         applied = report.discardActivities
                     )
                     GamingModeResultRow(
-                        label = "Process limit",
-                        value = if (report.processLimit) "1 cached process" else "Not applied",
+                        label = stringResource(R.string.gt_gm_label_limit),
+                        value = if (report.processLimit) stringResource(R.string.gt_gm_limit) else stringResource(R.string.gt_gm_not_applied),
                         applied = report.processLimit
                     )
                     GamingModeResultRow(
-                        label = "Other apps' background data",
+                        label = stringResource(R.string.gt_gm_label_other_data),
                         value = when (report.backgroundDataRestricted) {
                             // null means the user's own switch was already on, so this run left it
                             // alone — saying "not applied" would misreport a deliberate decision.
-                            null -> "Left as you set it"
-                            true -> "Blocked on metered"
-                            false -> "Not blocked"
+                            null -> stringResource(R.string.gt_gm_left_as_set)
+                            true -> stringResource(R.string.gt_gm_blocked_metered)
+                            false -> stringResource(R.string.gt_gm_not_blocked)
                         },
                         applied = report.backgroundDataRestricted != false
                     )
@@ -248,11 +272,23 @@ fun GamingModeCard(
                 if (report.unavailable.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(16.dp))
                     NoticeBlock(
-                        text = "Not available on this device:\n" +
+                        text = stringResource(R.string.gt_gm_unavailable_title) + "\n" +
                             report.unavailable.joinToString("\n") { "• $it" },
                         tint = Color(0xFFFFB300)
                     )
                 }
+            }
+
+            // Revert problems live in this same list, so they must not hide behind isActive:
+            // deactivation reports refused wake-ups and leftover blocks here, and a half-reverted
+            // device that looks clean is exactly how apps stay stopped with no explanation.
+            if (!isActive && report.unavailable.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                NoticeBlock(
+                    text = stringResource(R.string.gt_gm_revert_leftovers) + "\n" +
+                        report.unavailable.joinToString("\n") { "• $it" },
+                    tint = Color(0xFFFFB300)
+                )
             }
         }
     }

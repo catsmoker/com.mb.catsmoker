@@ -12,13 +12,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.catsmoker.app.R
 import com.catsmoker.app.shared.ui.components.ScreenScaffold
 import com.catsmoker.app.shared.ui.components.SectionCard
+import com.catsmoker.app.shared.ui.components.CatsmokerButton
 
 @Composable
 fun ProfilesListScreen(
@@ -32,8 +32,8 @@ fun ProfilesListScreen(
     var newProfileName by remember { mutableStateOf("") }
 
     ScreenScaffold(
-        title = "Spoof Profiles",
-        subtitle = "Manage your virtual device identities.",
+        title = stringResource(R.string.spoof_profiles_title),
+        subtitle = stringResource(R.string.spoof_profiles_subtitle),
         onBack = onBack,
         trailingContent = {
             IconButton(onClick = { showCreateDialog = true }) {
@@ -48,7 +48,7 @@ fun ProfilesListScreen(
             }
         } else if (uiState.profiles.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No profiles found. Create one!", color = Color.Gray)
+                Text(stringResource(R.string.spoof_list_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             LazyColumn(
@@ -72,17 +72,17 @@ fun ProfilesListScreen(
     if (showCreateDialog) {
         AlertDialog(
             onDismissRequest = { showCreateDialog = false },
-            title = { Text("New Profile") },
+            title = { Text(stringResource(R.string.spoof_dialog_new)) },
             text = {
                 OutlinedTextField(
                     value = newProfileName,
                     onValueChange = { newProfileName = it },
-                    label = { Text("Profile Name") },
+                    label = { Text(stringResource(R.string.spoof_field_profile_name)) },
                     modifier = Modifier.fillMaxWidth()
                 )
             },
             confirmButton = {
-                Button(
+                CatsmokerButton(
                     onClick = {
                         if (newProfileName.isNotBlank()) {
                             onCreateProfile(newProfileName)
@@ -91,12 +91,12 @@ fun ProfilesListScreen(
                         }
                     }
                 ) {
-                    Text("Create")
+                    Text(stringResource(R.string.spoof_action_create))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showCreateDialog = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.spoof_action_cancel))
                 }
             }
         )
@@ -120,8 +120,8 @@ fun ProfileItem(
         ) {
             Icon(Icons.Default.PhoneAndroid, null, tint = MaterialTheme.colorScheme.primary)
             Column(modifier = Modifier.weight(1f)) {
-                Text(name, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 16.sp, color = Color.White)
-                Text(details, fontSize = 12.sp, color = Color.Gray)
+                Text(name, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+                Text(details, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (canDelete) {
                 IconButton(onClick = onDelete) {

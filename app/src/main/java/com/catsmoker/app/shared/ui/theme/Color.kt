@@ -9,6 +9,9 @@ val NothingRed = Color(0xFFEB0000)
 val NothingGrey = Color(0xFF121212)
 val NothingGreyLight = Color(0xFF1E1E1E)
 
+// Press feedback: every button turns this while the finger is down.
+val PressPink = Color(0xFFFF999C)
+
 // Semantic colors
 val DarkBackground = NothingBlack
 val DarkSurface = NothingGrey

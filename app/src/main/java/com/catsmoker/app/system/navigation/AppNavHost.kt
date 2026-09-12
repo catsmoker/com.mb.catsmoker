@@ -98,6 +98,8 @@ fun AppNavHost(navController: NavHostController, startDestination: String) {
                 uiState = uiState,
                 onLoadApps = { viewModel.loadApps() },
                 onAssignProfile = { pkg, id -> viewModel.assignProfile(pkg, id) },
+                onAssignRateCandidate = { pkg, id, hz -> viewModel.assignRateCandidate(pkg, id, hz) },
+                onRemoveRateCandidate = { pkg, id, hz -> viewModel.removeRateCandidate(pkg, id, hz) },
                 onBack = { navController.popBackStack() }
             )
         }

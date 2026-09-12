@@ -47,7 +47,7 @@ fun GamingModeResultRow(label: String, value: String, applied: Boolean = true) {
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Text(text = label, color = Color.LightGray, fontSize = 13.sp)
+            Text(text = label, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f), fontSize = 13.sp)
         }
         Text(
             text = value,

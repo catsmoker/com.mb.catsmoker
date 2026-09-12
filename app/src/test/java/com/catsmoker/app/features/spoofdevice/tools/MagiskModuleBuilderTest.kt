@@ -62,6 +62,13 @@ class MagiskModuleBuilderTest {
         // Magisk runs this at late_start by name; misspell it and the module silently stops
         // reporting whether the spoof applied.
         assertTrue(members.containsKey("service.sh"))
+        // The root manager's action button runs this by name. Magisk only surfaces a button for
+        // modules that ship it, so a misspelling here is not "no WebUI" — it is no button at all.
+        assertTrue(members.containsKey("action.sh"))
+        // busybox httpd serves this tree verbatim: index at the root, the CGI script under
+        // webroot/cgi-bin/ where httpd's default configuration executes it.
+        assertTrue(members.containsKey("webroot/index.html"))
+        assertTrue(members.containsKey("webroot/cgi-bin/api.sh"))
     }
 
     @Test
@@ -86,10 +93,15 @@ class MagiskModuleBuilderTest {
         for (path in listOf(
             "META-INF/com/google/android/update-binary",
             "customize.sh",
-            "service.sh"
+            "service.sh",
+            "action.sh",
+            "webroot/cgi-bin/api.sh"
         )) {
             assertFalse("CR found in $path", members.getValue(path).contains('\r'))
         }
+        // The page is not a script, but the same reasoning applies: it is stored inside the ZIP,
+        // so its line endings depend on how this source file was checked out, not on any device.
+        assertFalse("CR found in webroot/index.html", members.getValue("webroot/index.html").contains('\r'))
     }
 
     @Test
@@ -163,6 +175,62 @@ class MagiskModuleBuilderTest {
         assertTrue(script.contains("MagiskHidePropsConf"))
     }
 
+    /**
+     * `spoofdevice/COPG-JSON/module/customize.sh`'s `check_zygisk()` counts root managers with
+     * `command -v` on each daemon and refuses when more than one is present. Same three here,
+     * plus the `/data/adb` trees update-binary already probes, so a manager counts even when only
+     * its install tree survives on PATH-less installer environments.
+     */
+    @Test
+    fun customizeShCountsAllThreeRootManagers() {
+        val script = build(spec()).getValue("customize.sh")
+        for (daemon in listOf("magisk", "ksud", "apd")) {
+            assertTrue("missing probe: command -v $daemon", script.contains("command -v $daemon"))
+        }
+        for (tree in listOf("magisk", "ksu", "ap")) {
+            assertTrue("missing probe: /data/adb/$tree tree", script.contains("/data/adb}/$tree"))
+        }
+        assertTrue(script.contains("\"\$ROOT_COUNT\" -gt 1"))
+    }
+
+    /**
+     * The refusal must actually refuse. It cannot `exit` — install_module *sources* this script —
+     * so it removes `system.prop` (nothing is ever handed to resetprop) and rewrites
+     * `module.prop` to say the module is not active. `service.sh` never rewrites that description
+     * back, because it exits first without a `system.prop` to read.
+     */
+    @Test
+    fun customizeShNeutralizesTheModuleWhenMultipleManagersArePresent() {
+        val script = build(spec()).getValue("customize.sh")
+        assertTrue(script.contains("rm -f \"\$MODPATH/system.prop\""))
+        assertTrue(script.contains("NOT ACTIVE"))
+        assertTrue(script.contains("root managers detected"))
+        // The congratulatory close belongs to the accepted path only.
+        val refusal = script.substringAfter("\"\$ROOT_COUNT\" -gt 1").substringBefore("\nelse")
+        assertFalse(refusal.contains("Happy gaming"))
+    }
+
+    /**
+     * The refused `module.prop` keeps the identity Magisk keys modules by. If it drifted, a
+     * re-flash after the user fixed their root setup would install a *second* module beside the
+     * inert one — the same reason [MODULE_ID][MagiskModuleBuilder.MODULE_ID] is fixed.
+     */
+    @Test
+    fun refusedModulePropReprintsTheSameModuleIdentity() {
+        val members = build(spec())
+        val heredoc = members.getValue("customize.sh")
+            .substringAfter("<<'CATSMOKER_MODULE_PROP'\n")
+            .substringBefore("\nCATSMOKER_MODULE_PROP")
+
+        val reprinted = LSPosedConfig.parseDeviceProps(heredoc)
+        val installed = LSPosedConfig.parseDeviceProps(members.getValue("module.prop"))
+
+        assertEquals(installed - "description", reprinted)
+        assertFalse(reprinted.containsKey("description"))
+        // The one line that must be computed on the device, at refusal time.
+        assertTrue(members.getValue("customize.sh").contains("echo \"description=NOT ACTIVE"))
+    }
+
     // ------------------------------------------------------------------ service.sh
 
     /**
@@ -222,6 +290,185 @@ class MagiskModuleBuilderTest {
         assertFalse(reprinted.containsKey("description"))
         // The description is the one line that must be computed on the device.
         assertTrue(members.getValue("service.sh").contains("echo \"description=\$DESC\""))
+    }
+
+    /**
+     * The model this script reports must come from `system.prop` as it stands at boot, not from a
+     * value baked into the ZIP at export time. The WebUI can rewrite the model in place between
+     * flashes; a baked string would keep naming the model the module shipped with while the device
+     * spoofed a different one — a report that agrees with the app and disagrees with the device.
+     */
+    @Test
+    fun serviceShReportsTheModelTheModuleNowHoldsNotTheOneItShippedWith() {
+        val script = build(spec())
+        // Read at runtime, from the same file the verify loop walks.
+        assertTrue(script.getValue("service.sh").contains("MODEL=\$(sed -n 's/^ro\\.product\\.model=//p' \"\$PROP\" | head -n 1)"))
+        assertTrue(script.getValue("service.sh").contains("# spoofed as: \$MODEL"))
+        // The spec's model ("Pixel 8 Pro") must not appear baked into the report lines.
+        assertFalse(script.getValue("service.sh").contains("spoofing as Pixel 8 Pro"))
+    }
+
+    // ------------------------------------------------------------------ WebUI
+
+    /**
+     * The launcher, pinned against `referance/spoofdevice/GameUnlocker-main/common/action.sh`
+     * (read in full): busybox is probed and executed before it is trusted, the port is random in
+     * 6000–9999, the token is per-session and removed with the server, and the whole thing dies
+     * after five minutes. Each piece is one bad experience away from being "simplified" away.
+     */
+    @Test
+    fun actionShPortsTheGameUnlockerLauncher() {
+        val script = build(spec()).getValue("action.sh")
+        assertTrue(script.startsWith("#!/sbin/sh"))
+        // Each busybox candidate is executed once before it is trusted, and the manager-private
+        // paths come before PATH.
+        assertTrue(script.contains("/data/adb/ksu/bin/busybox"))
+        assertTrue(script.contains("/data/adb/magisk/busybox"))
+        assertTrue(script.contains("/data/adb/ap/bin/busybox"))
+        assertTrue(script.contains("\"\$candidate\" true >/dev/null 2>&1"))
+        // Random port in 6000..9999, from /dev/urandom with an epoch fallback.
+        assertTrue(script.contains("PORT=\$((6000 + (PORT % 4000)))"))
+        assertTrue(script.contains("date +%s"))
+        // The token is per-session, unreadable by other uids, and removed with the server.
+        assertTrue(script.contains("echo \"\$AUTH_TOKEN\" > \"\$MODDIR/auth_token\""))
+        assertTrue(script.contains("chmod 0600 \"\$MODDIR/auth_token\""))
+        assertTrue(script.contains("rm -f \"\$MODDIR/auth_token\""))
+        // Loopback only, and it does not outlive its five minutes.
+        assertTrue(script.contains("httpd -p 127.0.0.1:\$RANDOM_PORT"))
+        assertTrue(script.contains("sleep 300"))
+        // The browser is opened with the token in the URL — that is the whole login mechanism.
+        assertTrue(script.contains("am start -a android.intent.action.VIEW -d \"http://127.0.0.1:\$RANDOM_PORT?token=\$AUTH_TOKEN\""))
+        // A stale server from an earlier button press must not hold the port.
+        assertTrue(script.contains("pkill -f \"httpd -p 127.0.0.1:\""))
+        // KSUWebUI, when present, gets the native launch instead — no httpd, no token.
+        assertTrue(script.contains("io.github.a13e300.ksuwebui/.WebUIActivity"))
+        assertTrue(script.contains("-e id '" + MagiskModuleBuilder.MODULE_ID + "'"))
+    }
+
+    /**
+     * The reference's adaptive rule, kept exactly: with an `auth_token` on disk every request must
+     * carry it; without one the page is inside KSUWebUI's sandbox and the check is skipped. A
+     * version that demanded the token unconditionally would lock that sandbox out; one that never
+     * demanded it would publish the module's state to any local app that could reach the port.
+     */
+    @Test
+    fun apiShEnforcesTheSessionTokenExactlyWhenOneExists() {
+        val script = build(spec()).getValue("webroot/cgi-bin/api.sh")
+        assertTrue(script.contains("if [ -f \"\$MODDIR/auth_token\" ]; then"))
+        assertTrue(script.contains("if [ \"\$TOKEN\" != \"\$EXPECTED_TOKEN\" ] || [ -z \"\$TOKEN\" ]; then"))
+        assertTrue(script.contains("Unauthorized"))
+        // The token travels in the query string, so the script must actually parse one.
+        assertTrue(script.contains("grep -o 'token=[^&]*'"))
+    }
+
+    /**
+     * The WebUI edits the model; it must not be able to widen the channel from inside the module.
+     * Exactly the four keys the installer flashes get rewritten, and the PixelProps flag — derived
+     * from the profile's *brand* at export — is left alone because the model string cannot
+     * re-derive it. The charset check exists because the value lands in `sed` replacements and
+     * `module.prop`.
+     */
+    @Test
+    fun apiShRewritesExactlyTheModelKeysAndNothingElse() {
+        val script = build(spec()).getValue("webroot/cgi-bin/api.sh")
+        // The loop drives all four MODEL_KEYS through one sed, with the value charset-bound first.
+        // Three keys continue the line with a backslash; the last one closes the list and opens
+        // the loop body.
+        assertTrue(script.contains("for KEY in \\"))
+        for (key in MagiskModuleBuilder.MODEL_KEYS.dropLast(1)) {
+            assertTrue("key $key missing from the rewrite loop", script.contains("$key \\"))
+        }
+        assertTrue(script.contains("${MagiskModuleBuilder.MODEL_KEYS.last()}; do"))
+        assertTrue(script.contains("sed -i \"s|^\$KEY=.*|\$KEY=\$VALUE|\" \"\$PROP\""))
+        assertTrue(script.contains("^[A-Za-z0-9 .()_-]{1,64}\$"))
+        // The PixelProps flag is read (get_state) but never written by this script.
+        assertFalse(script.contains("sed -i \"s|^persist"))
+        assertFalse(script.contains("sed -i \"s|^" + MagiskModuleBuilder.KEY_PIXELPROPS_GAME))
+        // A module without system.prop is "not active", not "empty state".
+        assertTrue(script.contains("system.prop is missing - module not active"))
+        // The new model must also reach module.prop's description, or the module list goes stale
+        // until the next service.sh run.
+        assertTrue(script.contains("sed -i \"s|^description=.*|description=Spoofs this device as \$VALUE"))
+    }
+
+    /**
+     * The page is served from the module directory over loopback, with no guarantee of any other
+     * networking — so it must not pull fonts, scripts or styles from the internet (the reference's
+     * page imports a Google font). It must also survive the ZIP round-trip without picking up a CR.
+     */
+    @Test
+    fun webIndexHtmlIsSelfContainedAndKnowsItsBackend() {
+        val page = build(spec()).getValue("webroot/index.html")
+        assertFalse("external URL in the page", page.contains("http://") || page.contains("https://"))
+        // The one backend it talks to, by the relative path busybox httpd resolves.
+        assertTrue(page.contains("cgi-bin/api.sh"))
+        // The page's own stated contract: a reboot applies the model, and the server is mortal.
+        assertTrue(page.contains("reboot"))
+        assertTrue(page.contains("five minutes"))
+    }
+
+    // ------------------------------------------------------------------ companion APK
+
+    /**
+     * The one binary member. It must survive the ZIP round-trip byte-for-byte — the text members are
+     * written through a UTF-8 encode that would silently corrupt an APK's non-UTF-8 bytes, and a
+     * corrupted APK is a `pm install` failure that only shows up on a device that no longer has the
+     * app to re-export with.
+     */
+    @Test
+    fun companionApkRoundTripsByteForByte() {
+        // Zip magic plus bytes that are not valid UTF-8, to catch any accidental text-encoding path.
+        val apk = byteArrayOf(0x50, 0x4b, 0x03, 0x04, 0xff.toByte(), 0xfe.toByte(), 0x00, 0x42)
+        val bytes = ByteArrayOutputStream()
+        val written = MagiskModuleBuilder.write(bytes, spec().copy(companionApk = apk))
+
+        // Reported honestly: the APK entry is in the list of what the archive holds, last.
+        assertEquals(MagiskModuleBuilder.COMPANION_APK_NAME, written.last())
+        assertTrue(written.dropLast(1).none { it == MagiskModuleBuilder.COMPANION_APK_NAME })
+
+        var roundTripped: ByteArray? = null
+        ZipInputStream(bytes.toByteArray().inputStream()).use { zip ->
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                if (entry.name == MagiskModuleBuilder.COMPANION_APK_NAME) roundTripped = zip.readBytes()
+            }
+        }
+        org.junit.Assert.assertArrayEquals(apk, roundTripped)
+    }
+
+    /** No APK in the spec means no APK member — older callers and tests get the same ZIP as before. */
+    @Test
+    fun noCompanionApkMeansNoApkMember() {
+        val members = build(spec())
+        assertFalse(members.containsKey(MagiskModuleBuilder.COMPANION_APK_NAME))
+        val bytes = ByteArrayOutputStream()
+        val written = MagiskModuleBuilder.write(bytes, spec())
+        assertFalse(written.contains(MagiskModuleBuilder.COMPANION_APK_NAME))
+    }
+
+    /**
+     * Pinned against `GameUnlocker-main/common/service.sh`: an APK beside the module is installed
+     * with `pm install -g` and then deleted, so delivery is one-shot. The one divergence is the
+     * presence check — with the app already installed, a same-version bundle would churn a
+     * pointless reinstall and an older one would fail as a downgrade, so the APK is discarded with
+     * "already present" instead. Either way the log says which of the three things happened.
+     */
+    @Test
+    fun serviceShInstallsTheCompanionOnceAndOnlyWhenAbsent() {
+        val script = build(spec()).getValue("service.sh")
+        // The reference's mechanism: install with permissions granted, then discard.
+        assertTrue(script.contains("pm install -g \"\$APK\""))
+        assertTrue(script.contains("rm -f \"\$APK\""))
+        // The divergence: the app's presence is checked first, and the package spelled out.
+        assertTrue(script.contains("pm list packages ${MagiskModuleBuilder.APPLICATION_ID} 2>/dev/null | grep -q ${MagiskModuleBuilder.APPLICATION_ID}"))
+        // Three outcomes, three log lines — installed, already present, refused.
+        assertTrue(script.contains("companion app installed from the module"))
+        assertTrue(script.contains("companion app already present"))
+        assertTrue(script.contains("companion app install refused by pm"))
+        // The block sits after the module.prop rewrite, so the report never waits on pm install.
+        assertTrue(
+            script.indexOf("} > \"\$MODDIR/module.prop.new\"") < script.indexOf("APK=\"\$MODDIR/${MagiskModuleBuilder.COMPANION_APK_NAME}\"")
+        )
     }
 
     // ------------------------------------------------------------------ boot safety

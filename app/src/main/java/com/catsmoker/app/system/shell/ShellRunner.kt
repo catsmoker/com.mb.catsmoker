@@ -24,13 +24,16 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import rikka.shizuku.Shizuku
 import java.io.File
+import java.lang.reflect.Method
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.time.Duration.Companion.milliseconds
 
 /**
- * Single entry point for privileged execution. Prefers root, falls back to a Shizuku
- * user service, then to an unprivileged shell.
+ * Single entry point for privileged execution. Prefers root, then Shizuku (an already-bound
+ * user service, else the one-shot remote shell — see [execShizukuRemote]), then an
+ * unprivileged shell. Never retries downward from root.
  */
 @Singleton
 class ShellRunner @Inject constructor(
@@ -67,6 +70,15 @@ class ShellRunner @Inject constructor(
     @Volatile
     private var fileService: IFileService? = null
 
+    /**
+     * When the last bind attempt failed, until when to stop retrying. A dead Shizuku made
+     * every command pay the full 3×(5 s timeout + 500 ms backoff) retry loop — the source of
+     * the multi-second "apply" the save editor showed on no-privilege devices — for a bind
+     * that cannot succeed until the user restarts Shizuku anyway.
+     */
+    @Volatile
+    private var bindBlockedUntil: Long = 0L
+
     /** Non-null only while a bind is in flight; concurrent callers await the same result. */
     private var pendingBind: CompletableDeferred<IFileService?>? = null
     private val bindMutex = Mutex()
@@ -78,9 +90,11 @@ class ShellRunner @Inject constructor(
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener { refreshShizukuPermission() }
 
     private val binderDeadListener = Shizuku.OnBinderDeadListener {
-        // Shizuku went away: the user service died with it, so drop the stale proxy.
+        // Shizuku went away: the user service died with it, so drop the stale proxy — and
+        // allow binding again, since a restarted Shizuku can accept a fresh bind.
         fileService = null
         activeConnection = null
+        bindBlockedUntil = 0L
         _shizukuHasPermission.value = false
     }
 
@@ -90,7 +104,12 @@ class ShellRunner @Inject constructor(
         if (!granted) return
         // Root outranks Shizuku, so do not spawn the helper process when root can already do the
         // work. execResult() binds lazily if root turns out to be unavailable later.
-        scope.launch(Dispatchers.IO) { if (!isRootAvailable()) bindUserService() }
+        scope.launch(Dispatchers.IO) {
+            if (!isRootAvailable()) {
+                bindBlockedUntil = 0L // a fresh grant makes a bind attempt meaningful again
+                bindUserService()
+            }
+        }
     }
 
     init {
@@ -128,6 +147,19 @@ class ShellRunner @Inject constructor(
 
     fun hasPrivilege(): Boolean = isRootAvailable() || _shizukuHasPermission.value
 
+    /**
+     * Drops the cached user-service proxy so the next command rebinds from scratch. Callers
+     * use this when a command came back channel-less while Shizuku's binder still answers —
+     * the proxy is provably stale, and holding it only guarantees the next attempt fails the
+     * same way. Not the same as [bindBlockedUntil]'s failure block: this one *enables* a
+     * retry instead of suppressing it.
+     */
+    fun markShizukuServiceUnreachable() {
+        fileService = null
+        activeConnection = null
+        bindBlockedUntil = 0L
+    }
+
     fun refreshShizukuPermission() {
         if (!Shizuku.pingBinder()) {
             // Shizuku can be killed without the binder-dead callback ever firing.
@@ -144,7 +176,12 @@ class ShellRunner @Inject constructor(
                 return
             }
             // The root probe forks a shell, so it must not run on the caller's thread.
-            scope.launch(Dispatchers.IO) { if (!isRootAvailable()) bindUserService() }
+            scope.launch(Dispatchers.IO) {
+                if (!isRootAvailable()) {
+                    bindBlockedUntil = 0L // binder is alive and permission granted — retry is meaningful
+                    bindUserService()
+                }
+            }
         } catch (_: Throwable) {
             _shizukuHasPermission.value = false
         }
@@ -171,6 +208,9 @@ class ShellRunner @Inject constructor(
     private suspend fun bindUserService(): IFileService? {
         fileService?.let { if (Shizuku.pingBinder()) return it else fileService = null }
         if (!_shizukuHasPermission.value || !Shizuku.pingBinder()) return null
+        // A bind that just failed cannot succeed again until Shizuku itself restarts (the
+        // dead-listener clears this); stop paying the retry loop on every command meanwhile.
+        if (System.currentTimeMillis() < bindBlockedUntil) return null
 
         val deferred: CompletableDeferred<IFileService?>
         var isOwner = false
@@ -186,10 +226,15 @@ class ShellRunner @Inject constructor(
         try {
             var bound: IFileService? = null
             for (attempt in 1..MAX_BIND_RETRIES) {
+                // Completes the moment this attempt's onServiceConnected fires — the callback
+                // is the fast wake, and the deferred must exist before the connection object
+                // that closes over it.
+                val pendingConnected = CompletableDeferred<IFileService?>()
                 val connection = object : ServiceConnection {
                     override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
                         if (activeConnection !== this) return
                         fileService = service?.let { IFileService.Stub.asInterface(it) }
+                        pendingConnected.complete(fileService)
                     }
 
                     override fun onServiceDisconnected(name: ComponentName?) {
@@ -208,8 +253,11 @@ class ShellRunner @Inject constructor(
                 }
 
                 if (requested) {
+                    // The callback path is the fast wake (await returns the moment
+                    // onServiceConnected completes the deferred); the poll loop is the safety
+                    // net for a callback that never fires. Either one returns the proxy.
                     bound = withTimeoutOrNull(BIND_TIMEOUT_MS) {
-                        while (fileService == null) delay(BIND_POLL_MS)
+                        pendingConnected.await()
                         fileService
                     }
                     if (bound != null) break
@@ -217,7 +265,10 @@ class ShellRunner @Inject constructor(
 
                 if (attempt < MAX_BIND_RETRIES) delay(BIND_RETRY_DELAY_MS)
             }
-            if (bound == null) Log.w(TAG, "Shizuku user service did not bind after $MAX_BIND_RETRIES attempts")
+            if (bound == null) {
+                Log.w(TAG, "Shizuku user service did not bind after $MAX_BIND_RETRIES attempts")
+                bindBlockedUntil = System.currentTimeMillis() + BIND_BLOCK_MS.inWholeMilliseconds
+            }
             deferred.complete(bound)
             return bound
         } catch (t: Throwable) {
@@ -276,6 +327,12 @@ class ShellRunner @Inject constructor(
             }
         }
 
+        // No bound user service. The reference's own channel needs none: BattleGrounds_GFX
+        // (referance/gamingtools/BattleGrounds_GFX-main MainActivity2/3 executeShellCommand)
+        // forks every command through Shizuku's one-shot remote process — shell UID, no
+        // helper to bind, so a helper that refuses to start cannot take the command down.
+        execShizukuRemote(command)?.let { return@withContext it }
+
         val result = runCatching { Shell.cmd(command).exec() }.getOrNull()
             ?: return@withContext ExecResult.FAILED
         if (!result.isSuccess) {
@@ -285,9 +342,128 @@ class ShellRunner @Inject constructor(
         ExecResult(result.code, result.out.joinToString("\n"), "")
     }
 
+    /**
+     * One-shot command in Shizuku's own process (shell UID) via the private `Shizuku.newProcess`
+     * — the same reflective call BattleGrounds_GFX uses, fed [stdin] before stdout is read.
+     * This needs only the Shizuku binder and the permission grant: no user-service spawn, no
+     * bind handshake, no daemonized helper to go stale, which is exactly why it works where
+     * [bindUserService] reports "helper could not be started" (a version-gated or wedged
+     * helper leaves this channel fully alive). Both pipes are drained concurrently and the
+     * wait is bounded — a wedged remote process must not hold a binder thread, the same rule
+     * FileService's KDoc states for its service. Binary-safe for [readFileDirect]: the
+     * trimmed stdout travels back as ISO-8859-1, a byte-for-byte mapping, so a save's GVAS
+     * bytes are not mangled by any text decode. Null when the binder is gone, the permission
+     * is missing, or the call itself fails.
+     */
+    private fun execShizukuRemoteRaw(command: String, stdin: ByteArray): ExecResult? {
+        if (!Shizuku.pingBinder()) return null
+        if (runCatching { Shizuku.checkSelfPermission() }.getOrNull() != PackageManager.PERMISSION_GRANTED) return null
+        val newProcess: Method = runCatching {
+            Shizuku::class.java.getDeclaredMethod(
+                "newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java
+            ).apply { isAccessible = true }
+        }.getOrNull() ?: return null
+
+        return try {
+            val process = newProcess.invoke(null, arrayOf("sh", "-c", command), null, null)
+                as? java.lang.Process ?: return null
+            // Both pipes must be drained concurrently; reading stdout to EOF first deadlocks
+            // the moment stderr fills its 64 KB buffer.
+            val stderr = StringBuilder()
+            val errDrainer = Thread {
+                runCatching { process.errorStream.bufferedReader().readText() }
+                    .onSuccess { stderr.append(it) }
+            }.apply { isDaemon = true; start() }
+            val stdout = try {
+                process.outputStream.use { it.write(stdin) }
+                process.inputStream.bufferedReader().readText()
+            } catch (_: Exception) {
+                ""
+            }
+            val finished = process.waitFor(REMOTE_COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            if (!finished) process.destroy()
+            errDrainer.join(DRAIN_JOIN_MILLIS)
+            val exitCode = if (finished) process.exitValue() else -1
+            if (exitCode != 0) {
+                Log.w(TAG, "Shizuku remote exec exit $exitCode: ${stderr.toString().ifBlank { "no stderr" }}")
+            }
+            ExecResult(exitCode, stdout.trimEnd('\n'), stderr.toString().trimEnd('\n'))
+        } catch (t: Throwable) {
+            Log.w(TAG, "Shizuku remote exec threw", t)
+            null
+        }
+    }
+
     suspend fun trimCaches() {
         exec("pm trim-caches 4G")
     }
+
+    // -------------------------------------------------------------- file bytes
+
+    /**
+     * Reads [path] as bytes through Shizuku. The user service is first — one binder call, no
+     * fork; the remote-shell channel is the fallback when the helper cannot start. Binary-safe
+     * by construction: the service returns the file's own bytes, and the remote channel pipes
+     * them through stdin (not a shell variable or a text pipe that mangles non-UTF8), which is
+     * why a save's GVAS bytes survive `cat > stage` + `cp` untouched — the same move
+     * BattleGrounds_GFX makes with its whole-save template push.
+     *
+     * Three outcomes, kept distinct for the caller:
+     * - non-null, non-empty — the file's bytes;
+     * - non-null, **empty** — the channel answered but nothing was read: the file is missing
+     *   or unreadable (`cat` exits 1 on both). This is the existence probe — callers must not
+     *   read it as "no channel";
+     * - null — no channel answered at all (binder gone, permission missing, reflection dead).
+     *
+     * [forceBind] makes a blocked bind pay one attempt — used by the save editor's READ step,
+     * where "the helper wasn't up yet" must not read as "Shizuku is broken".
+     */
+    suspend fun readFileDirect(path: String, forceBind: Boolean = false): ByteArray? = withContext(Dispatchers.IO) {
+        if (forceBind) bindBlockedUntil = 0L
+        runCatching { bindUserService()?.readFile(path) }.getOrNull()
+            ?: execShizukuRemoteRaw("cat ${joinArgs(arrayOf(path))}", ByteArray(0))?.let { result ->
+                if (result.isSuccess) {
+                    result.stdout.toByteArray(Charsets.ISO_8859_1)
+                } else {
+                    // The channel ran and the read failed — a missing (or unreadable) file,
+                    // not a dead channel. Empty is the caller's "nothing there" signal.
+                    ByteArray(0)
+                }
+            }
+    }
+
+    /**
+     * Writes [bytes] over [path]; the boolean is the channel's own flush answer, not just "a
+     * command was sent". The user service writes and fsyncs inside its own process; the
+     * remote-shell fallback stages the bytes in /data/local/tmp (shell-uid-writable, the same
+     * staging file BattleGrounds_GFX uses) and `cp`s them over the target — the cp exit code
+     * is that channel's report. Null when no service is bound at all (no answer), distinct
+     * from a false (the channel refused).
+     */
+    suspend fun writeFileDirect(path: String, bytes: ByteArray): Boolean? = withContext(Dispatchers.IO) {
+        runCatching { bindUserService()?.writeFile(path, bytes) }.getOrNull()
+            ?: writeFileViaRemoteShell(path, bytes)
+    }
+
+    /**
+     * The remote-shell write path. A null return means the channel never answered (binder
+     * gone, permission missing); false means it answered and refused — the caller reports
+     * those differently. The staging file is unlinked in a finally so no shell-owned leftover
+     * accumulates in /data/local/tmp.
+     */
+    private suspend fun writeFileViaRemoteShell(path: String, bytes: ByteArray): Boolean? {
+        val stage = "/data/local/tmp/catsmoker_write_" + System.currentTimeMillis() + ".tmp"
+        val write = execShizukuRemoteRaw("cat > $stage", bytes)
+            ?: return null // binder/permission never answered — no channel at all
+        if (!write.isSuccess) return false
+        val copy = execShizukuRemote("cp -f ${joinArgs(arrayOf(stage))} ${joinArgs(arrayOf(path))}")
+        execShizukuRemote("rm -f ${joinArgs(arrayOf(stage))}")
+        return copy?.isSuccess
+    }
+
+    /** [execShizukuRemoteRaw] with no stdin — the plain remote `sh -c` path. */
+    private fun execShizukuRemote(command: String): ExecResult? =
+        execShizukuRemoteRaw(command, ByteArray(0))
 
     // ------------------------------------------------------------------ thermal
 
@@ -438,10 +614,19 @@ class ShellRunner @Inject constructor(
         const val USER_SERVICE_TAG = "catsmoker_file_service"
         const val ROOT_CHECK_COOLDOWN_MS = 2000L
         const val PROC_STAT = "/proc/stat"
-        const val MAX_BIND_RETRIES = 3
-        val BIND_TIMEOUT_MS = 5000.milliseconds
+        // One attempt, short timeout. This used to be 3×5 s, back when the user service was the
+        // only Shizuku channel — a wedged helper then cost every command up to 16 s before
+        // failing. With execShizukuRemote as the live fallback, retries only delay the channel
+        // that actually works: a healthy daemon(true) helper answers a bind in milliseconds, so
+        // one 3 s attempt distinguishes "alive" from "wedged" just as well.
+        const val MAX_BIND_RETRIES = 1
+        val BIND_TIMEOUT_MS = 3000.milliseconds
         val BIND_RETRY_DELAY_MS = 500.milliseconds
         val BIND_POLL_MS = 50.milliseconds
+        /** How long a failed bind stops further attempts — see [bindBlockedUntil]. */
+        val BIND_BLOCK_MS = 10_000.milliseconds
+        val REMOTE_COMMAND_TIMEOUT_SECONDS = 30L
+        val DRAIN_JOIN_MILLIS = 1000L
         val SHELL_METACHARACTERS = charArrayOf(
             '"', '\'', '$', '`', '\\', '!', '*', '?', '[', ']', '(', ')', '{', '}',
             '|', '&', ';', '<', '>', '~', '#'

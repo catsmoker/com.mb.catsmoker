@@ -8,8 +8,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.catsmoker.app.R
 
 /**
  * The header-plus-content frame every screen except the main one is wrapped in.
@@ -44,8 +45,8 @@ fun ScreenScaffold(
                 IconButton(onClick = onBack) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = Color.White
+                        contentDescription = stringResource(R.string.core_back),
+                        tint = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
@@ -54,13 +55,13 @@ fun ScreenScaffold(
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleLarge,
-                    color = Color.White
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 if (subtitle != null) {
                     Text(
                         text = subtitle,
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }

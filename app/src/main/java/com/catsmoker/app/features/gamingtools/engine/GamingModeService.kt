@@ -79,8 +79,8 @@ class GamingModeService : Service() {
     }
 
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(CHANNEL_ID, "Gaming Mode", NotificationManager.IMPORTANCE_LOW)
-        channel.description = "Shown while Gaming Mode is active"
+        val channel = NotificationChannel(CHANNEL_ID, getString(R.string.gt_svc_gm_channel), NotificationManager.IMPORTANCE_LOW)
+        channel.description = getString(R.string.gt_svc_gm_channel_desc)
         getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
     }
 
@@ -101,8 +101,8 @@ class GamingModeService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Gaming Mode Active")
-            .setContentText("Background apps suspended • Performance locked")
+            .setContentTitle(getString(R.string.gt_svc_gm_title))
+            .setContentText(getString(R.string.gt_svc_gm_text))
             .setSmallIcon(R.drawable.ic_launcher_foreground) // Use appropriate icon
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)

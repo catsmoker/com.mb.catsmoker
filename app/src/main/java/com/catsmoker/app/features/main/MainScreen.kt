@@ -73,7 +73,7 @@ fun MainRoute(onNavigate: (String) -> Unit) {
         } else {
             Toast.makeText(
                 context,
-                "Tap ${3 - backPressedCount} more times to exit",
+                context.getString(R.string.core_exit_tap, 3 - backPressedCount),
                 Toast.LENGTH_SHORT
             ).show()
         }
@@ -161,7 +161,7 @@ fun MainScreen(
                 Text(
                     text = stringResource(R.string.app_name),
                     style = MaterialTheme.typography.titleLarge,
-                    color = Color.White
+                    color = MaterialTheme.colorScheme.onSurface
                 )
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -189,7 +189,7 @@ fun MainScreen(
                                 Text(
                                     text = stringResource(R.string.dash_live_performance),
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = Color.White.copy(alpha = 0.5f)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Row(verticalAlignment = Alignment.Bottom) {
                                     // The number is whatever was actually measured; when nothing was,
@@ -201,7 +201,7 @@ fun MainScreen(
                                     )
                                     Text(
                                         text = when {
-                                            state.fps == null -> state.fpsReadStatus.label
+                                            state.fps == null -> stringResource(state.fpsReadStatus.labelRes)
                                             // The vsync fallback counts this app's frames, not the
                                             // game's, so it is never labelled plain "FPS".
                                             state.fpsSource == FpsSource.Choreographer ->
@@ -209,7 +209,7 @@ fun MainScreen(
                                             else -> stringResource(R.string.dash_fps_label)
                                         },
                                         style = MaterialTheme.typography.titleMedium,
-                                        color = Color.White.copy(alpha = 0.5f),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
                                     )
                                 }
@@ -218,14 +218,14 @@ fun MainScreen(
                             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                     CompactStat(
-                                        label = "CPU",
+                                        label = stringResource(R.string.core_metric_cpu),
                                         value = state.cpuPercentage
                                             ?.let { "$it%" }
                                             ?: state.cpuReadStatus.compactLabel(),
                                         color = Color(0xFF22C55E)
                                     )
                                     CompactStat(
-                                        label = "RAM",
+                                        label = stringResource(R.string.core_metric_ram),
                                         value = state.ramUsedGb
                                             ?.let { String.format(Locale.US, "%.1fG", it) }
                                             ?: state.ramReadStatus.compactLabel(),
@@ -235,14 +235,14 @@ fun MainScreen(
                                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                     // Label doubles as the source: SoC sensor when available, else battery.
                                     CompactStat(
-                                        label = if (state.displayTempIsSoc) "SOC" else "TEMP",
+                                        label = if (state.displayTempIsSoc) stringResource(R.string.core_metric_soc) else stringResource(R.string.core_metric_temp),
                                         value = state.displayTempC
                                             ?.let { "${it.toInt()}°" }
                                             ?: state.displayTempReadStatus.compactLabel(),
                                         color = Color(0xFFF59E0B)
                                     )
                                     CompactStat(
-                                        label = "PING",
+                                        label = stringResource(R.string.core_metric_ping),
                                         value = state.pingMs
                                             ?.let { "${it}ms" }
                                             ?: state.pingReadStatus.compactLabel(),
@@ -287,7 +287,7 @@ fun MainScreen(
                     Text(
                         text = stringResource(R.string.dash_quick_actions),
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(alpha = 0.5f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
                     )
 
@@ -298,8 +298,8 @@ fun MainScreen(
                         QuickActionButton(
                             title = stringResource(R.string.dash_spoof_title),
                             subtitle = stringResource(R.string.dash_spoof_subtitle),
-                            iconContainerColor = Color.White.copy(alpha = 0.05f),
-                            iconContentColor = Color.White,
+                            iconContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            iconContentColor = MaterialTheme.colorScheme.onSurface,
                             onClick = onOpenSpoofDevice,
                             modifier = Modifier.weight(1f).fillMaxHeight(),
                             icon = { Icon(Icons.Default.SettingsInputComponent, null) }
@@ -307,21 +307,26 @@ fun MainScreen(
                         QuickActionButton(
                             title = stringResource(R.string.dash_edit_files_title),
                             subtitle = stringResource(R.string.dash_edit_files_subtitle),
-                            iconContainerColor = Color.White.copy(alpha = 0.05f),
-                            iconContentColor = Color.White,
+                            iconContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            iconContentColor = MaterialTheme.colorScheme.onSurface,
                             onClick = onOpenEditGameFiles,
                             modifier = Modifier.weight(1f).fillMaxHeight(),
                             icon = { Icon(Icons.Default.FolderOpen, null) }
                         )
                     }
-                    
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // HSR / WuWa / GRID live inside File Engineering's "Advanced Editors" section
+                    // now — one place for every game-file tool, instead of three dashboard cards.
+
                     Spacer(modifier = Modifier.height(12.dp))
 
                     QuickActionButton(
                         title = stringResource(R.string.Gaming_tools_title),
                         subtitle = stringResource(R.string.dash_gaming_tools_subtitle),
-                        iconContainerColor = Color.White.copy(alpha = 0.05f),
-                        iconContentColor = Color.White,
+                        iconContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        iconContentColor = MaterialTheme.colorScheme.onSurface,
                         onClick = onOpenGamingTools,
                         isFullWidth = true,
                         showChevron = true,
@@ -331,10 +336,10 @@ fun MainScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     QuickActionButton(
-                        title = "Settings",
-                        subtitle = "Configuration & Preferences",
-                        iconContainerColor = Color.White.copy(alpha = 0.05f),
-                        iconContentColor = Color.White,
+                        title = stringResource(R.string.core_settings_title),
+                        subtitle = stringResource(R.string.core_settings_subtitle),
+                        iconContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        iconContentColor = MaterialTheme.colorScheme.onSurface,
                         onClick = onOpenSettings,
                         isFullWidth = true,
                         showChevron = true,
@@ -346,8 +351,8 @@ fun MainScreen(
                     QuickActionButton(
                         title = stringResource(R.string.about_header_title),
                         subtitle = stringResource(R.string.dash_about_subtitle),
-                        iconContainerColor = Color.White.copy(alpha = 0.05f),
-                        iconContentColor = Color.White,
+                        iconContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        iconContentColor = MaterialTheme.colorScheme.onSurface,
                         onClick = onOpenAbout,
                         isFullWidth = true,
                         showChevron = true,
@@ -387,7 +392,9 @@ fun CombinedChart(
             .fillMaxWidth()
             .height(120.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.03f))
+            // Theme panel, not a fixed tint: the old white-3% wash was invisible on a
+            // light card, leaving the lines floating on the card itself.
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(8.dp)
             .drawWithCache {
                 val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
@@ -431,12 +438,12 @@ fun StatusBadge(label: String, active: Boolean, activeColor: Color) {
     Box(
         modifier = Modifier
             .background(
-                if (active) activeColor.copy(alpha = 0.1f) else Color.White.copy(alpha = 0.03f),
+                if (active) activeColor.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant,
                 RoundedCornerShape(8.dp)
             )
             .border(
                 1.dp,
-                if (active) activeColor.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.05f),
+                if (active) activeColor.copy(alpha = 0.2f) else MaterialTheme.colorScheme.outlineVariant,
                 RoundedCornerShape(8.dp)
             )
             .padding(horizontal = 8.dp, vertical = 4.dp)
@@ -445,12 +452,12 @@ fun StatusBadge(label: String, active: Boolean, activeColor: Color) {
             Box(
                 modifier = Modifier
                     .size(4.dp)
-                    .background(if (active) activeColor else Color.White.copy(alpha = 0.3f), CircleShape)
+                    .background(if (active) activeColor else MaterialTheme.colorScheme.onSurfaceVariant, CircleShape)
             )
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
-                color = if (active) Color.White else Color.White.copy(alpha = 0.5f)
+                color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -479,11 +486,12 @@ fun CompactStat(label: String, value: String, color: Color) {
  * Short enough for the dashboard row and never a number: a 0 here would be a value the device never
  * reported. The full reason is spelled out in the performance overlay, which has room for it.
  */
+@Composable
 private fun MetricReadStatus.compactLabel(): String = when (this) {
-    MetricReadStatus.Loading -> "…"
-    MetricReadStatus.PrivilegeDenied -> "root?"
-    MetricReadStatus.Unsupported -> "n/s"
-    else -> "N/A"
+    MetricReadStatus.Loading -> stringResource(R.string.core_compact_loading)
+    MetricReadStatus.PrivilegeDenied -> stringResource(R.string.core_compact_privilege)
+    MetricReadStatus.Unsupported -> stringResource(R.string.core_compact_unsupported)
+    else -> stringResource(R.string.core_compact_na)
 }
 
 @Preview(showBackground = true, backgroundColor = 0xFF000000)

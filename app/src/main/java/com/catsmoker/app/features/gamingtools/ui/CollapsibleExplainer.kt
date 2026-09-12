@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,9 +25,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.catsmoker.app.R
 
 /**
  * One collapsed-by-default explanation, used for every "what is this?" text in Gaming Tools.
@@ -76,7 +79,7 @@ fun CollapsibleExplainer(
             )
             Icon(
                 imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                contentDescription = if (expanded) "Hide" else "Show",
+                contentDescription = if (expanded) stringResource(R.string.gt_explainer_hide) else stringResource(R.string.gt_explainer_show),
                 tint = accent,
                 modifier = Modifier.size(18.dp)
             )
@@ -89,7 +92,7 @@ fun CollapsibleExplainer(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 lines.forEach { line ->
-                    Text(line, fontSize = 11.sp, color = Color.LightGray, lineHeight = 16.sp)
+                    Text(line, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f), lineHeight = 16.sp)
                 }
             }
         }

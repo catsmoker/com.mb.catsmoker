@@ -68,13 +68,13 @@ fun LogsScreen(
         onBack = onBack,
         trailingContent = {
             IconButton(onClick = onRefresh, enabled = !isLoading) {
-                Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.logs_refresh), tint = Color.White)
+                Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.logs_refresh), tint = MaterialTheme.colorScheme.onSurface)
             }
             IconButton(onClick = onShare) {
-                Icon(Icons.Default.Share, contentDescription = stringResource(R.string.logs_share), tint = Color.White)
+                Icon(Icons.Default.Share, contentDescription = stringResource(R.string.logs_share), tint = MaterialTheme.colorScheme.onSurface)
             }
             IconButton(onClick = { onClear() }) {
-                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.logs_clear), tint = Color.White)
+                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.logs_clear), tint = MaterialTheme.colorScheme.onSurface)
             }
         }
     ) {
@@ -85,13 +85,13 @@ fun LogsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 8.dp),
-                placeholder = { Text(stringResource(R.string.logs_filter_placeholder), color = Color.Gray) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray) },
+                placeholder = { Text(stringResource(R.string.logs_filter_placeholder), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
                 ),
                 shape = RoundedCornerShape(12.dp),
                 singleLine = true
@@ -103,7 +103,7 @@ fun LogsScreen(
                 } else if (filteredLogs.isEmpty()) {
                     Text(
                         text = stringResource(R.string.logs_empty),
-                        color = Color.Gray,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.align(Alignment.Center)
                     )
                 } else {

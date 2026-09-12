@@ -6,12 +6,12 @@
         <item name="android:icon">@mipmap/ic_launcher</item>
         <item name="android:logo">@mipmap/ic_launcher</item>
 
-        <!-- Deep Black Background for Nothing OS look -->
-        <item name="android:windowBackground">@color/black</item>
+        <!-- Paper background for the light theme (values-night/ stays black). -->
+        <item name="android:windowBackground">@color/white</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
 
         <!-- Cutout Mode -->
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
@@ -20,15 +20,15 @@
     <style name="Theme.Catsmoker" parent="Base.Theme.Catsmoker" />
 
     <style name="Theme.Catsmoker.NoWindowBackground" parent="Theme.Catsmoker">
-        <item name="android:windowBackground">@color/black</item>
+        <item name="android:windowBackground">@color/white</item>
     </style>
 
     <!-- Splash Screen Theme -->
     <style name="Theme.App.Starting" parent="Theme.SplashScreen">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
-        <item name="windowSplashScreenBackground">@color/black</item>
-        <item name="windowSplashScreenIconBackgroundColor">@color/black</item>
+        <item name="windowSplashScreenBackground">@color/white</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/white</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_icon</item>
         <item name="windowSplashScreenAnimationDuration">200</item>
         <item name="postSplashScreenTheme">@style/Theme.Catsmoker.NoWindowBackground</item>

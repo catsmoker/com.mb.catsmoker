@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- System per-app language settings (API 33+). The in-app Settings toggle covers all API
+     levels via LocaleHelper; this only advertises the same list to the OS settings screen. -->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="en" />
+    <locale android:name="ar" />
+    <locale android:name="es" />
+    <locale android:name="zh-CN" />
+</locale-config>

@@ -33,12 +33,65 @@ object LSPosedConfig {
     const val KEY_SAFE_MODE_PACKAGES = "safe_mode.packages"
 
     /**
+     * Packages the module will never spoof, whatever the config channels say.
+     *
+     * From the references' banking blacklists — `GameUnlocker-main/common/config.json`
+     * (`cpu_spoof.blacklist`) and `COPG-JSON/module/COPG.json` (`:blocked` entries). In those
+     * Zygisk modules the blacklist is the *primary* gate, because Zygisk loads into every
+     * process on the device; here the LSPosed scope array is the primary gate and no banking
+     * app is in it, so this list is a backstop for the one path around it: a user who widens
+     * the scope by hand in the LSPosed manager and assigns a profile. A banking app reading a
+     * spoofed identity is a fraud-detection hazard out of proportion to anything spoofing it
+     * could gain, so this list overrides an explicit assignment — and the module logs that it
+     * did, rather than spoofing nothing silently.
+     */
+    val NEVER_SPOOF_PACKAGES = setOf(
+        "com.bbl.mobilebanking",
+        "com.sbi.YONO",
+        "com.hdfcbank.payzapp",
+        "com.csam.icici.bank.imobile"
+    )
+
+    /**
      * Key inside a rendered profile saying whether the profile's screen metrics should be applied.
      *
      * Named after the reference project's `ConfigManager.KEY_APPLY_SCREEN_METRICS` so both sides of
      * the config file speak the same vocabulary.
      */
     const val KEY_APPLY_SCREEN_METRICS = "device.apply_screen_metrics"
+
+    /**
+     * GL vendor string (`glGetString(GL_VENDOR)`) the profile should answer with, when set.
+     *
+     * Like `device.imei` this is one of our own profile keys, not a system property: there is no
+     * `ro.` property behind it, so [SYSTEM_PROPERTY_PREFIXES] already keeps it out of the getprop
+     * overlay and out of any channel that writes the real property store. Blank means "leave the
+     * GPU strings alone" — a half-set GL identity (spoofed vendor, real renderer) is a stronger
+     * fingerprint than neither, which is why the two keys are always rendered as a pair by the
+     * editor.
+     */
+    const val KEY_GPU_VENDOR = "gpu.vendor"
+
+    /** GL renderer string (`glGetString(GL_RENDERER)`), the partner of [KEY_GPU_VENDOR]. */
+    const val KEY_GPU_RENDERER = "gpu.renderer"
+
+    /**
+     * Refresh rate in Hz the profile should answer `Display.getRefreshRate()` with, when set.
+     *
+     * Another of our own profile keys with no `ro.` property behind it — and there is no
+     * system-property surface for refresh rate at all, so unlike the identity keys there is no
+     * `getprop` half to disagree with: hooking the Display read is the entire reachable surface,
+     * and the both-channels test is satisfied by construction. Zero (the editor's blank field)
+     * means "leave the panel's real rate alone".
+     *
+     * The mechanism is the reference project's: `processHook.spoofRefreshRate` (read in full)
+     * hooks every `Display.getRefreshRate` overload and forces the profile's rate, guarded on the
+     * profile actually carrying one. What is deliberately not ported: its compiled per-package
+     * DEVICE_MAP (assignments and frame-rate ladders own the package→profile mapping here), its
+     * per-device `refreshrate` strings (reference model-table data, not preset candidates —
+     * presets stay blank like their GPU strings), and HEAD's remote-JSON fetch design.
+     */
+    const val KEY_SCREEN_REFRESH_RATE = "screen.refresh_rate"
 
     /** Accepts the `1` / `true` spellings a rendered or hand-edited config can carry. */
     fun isFlagEnabled(value: String?): Boolean =

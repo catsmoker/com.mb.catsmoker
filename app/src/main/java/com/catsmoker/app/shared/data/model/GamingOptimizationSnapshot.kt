@@ -21,6 +21,16 @@ data class GamingOptimizationSnapshot(
     val uidWhitelistedBefore: Boolean = false,
     val vivoGameCubeApps: String? = null,
     val vivoSpeedModeApps: String? = null,
+    /**
+     * The two vivo high-refresh-rate whitelist CSVs (`vivo_high_refresh_rate_apps`,
+     * `vivo_screen_refresh_rate_apps_list`) as the device held them, same contract as
+     * [vivoGameCubeApps] above: null when there was no game to target or the device is not
+     * vivo/iQOO, blank when the key was simply not set. The skin keeps its panel at peak only
+     * for apps on these lists, so Gaming Mode appends the game to them on activation and the
+     * whole recorded value goes back on the way out.
+     */
+    val vivoHighRefreshRateApps: String? = null,
+    val vivoScreenRefreshRateAppsList: String? = null,
     val originalRingtoneVolume: Int? = null,
     val originalBrightnessMode: Int? = null,
     val originalRotation: Int? = null,
@@ -60,7 +70,34 @@ data class GamingOptimizationSnapshot(
      * there was no game to target, the device is too old for game interventions, or the read
      * failed — in all three cases the flag is left completely alone.
      */
-    val gameOverlay: SettingValue? = null
+    val gameOverlay: SettingValue? = null,
+    /**
+     * Qualcomm's `vendor.gpu.mode` as the vendor booted with it — what Gaming Mode's GPU
+     * performance switch puts back on deactivation.
+     *
+     * `existed = false` is the normal case on every SoC that is not Qualcomm (or whose vendor
+     * does not expose the knob): the activation-side gate then skips the switch entirely, so
+     * there is nothing to restore. null means the property could not be read at all, and the
+     * revert leaves it alone.
+     */
+    val vendorGpuMode: SettingValue? = null,
+    /**
+     * `vendor.gfx.low_quality` as it was — the second half of the same Qualcomm switch, restored
+     * by the same rule as [vendorGpuMode].
+     */
+    val vendorGfxLowQuality: SettingValue? = null,
+    /**
+     * Qualcomm's `debug.vendor.qti.game.fps` as it was before Gaming Mode hinted the panel's
+     * measured peak at the vendor's perf framework.
+     *
+     * `existed = false` is the normal case — nothing defines the property until something sets
+     * it — and unlike every other field here, the revert cannot fully honour it: `setprop` can
+     * neither create nor delete a property, so a hint that did not exist before is left in
+     * place until the next reboot clears the debug property area. The leftover is bounded and
+     * stated (see `GamingModeReport.qtiGameFps`) rather than hidden. null means the read failed
+     * and the property is left completely alone.
+     */
+    val debugVendorQtiGameFps: SettingValue? = null
 ) {
     fun toJson(): String = Gson().toJson(this)
 

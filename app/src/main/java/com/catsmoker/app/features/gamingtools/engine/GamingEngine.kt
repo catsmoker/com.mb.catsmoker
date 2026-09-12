@@ -8,6 +8,7 @@ import android.media.AudioManager
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.edit
+import com.catsmoker.app.R
 import com.catsmoker.app.shared.data.model.GamingOptimizationSnapshot
 import com.catsmoker.app.shared.data.model.SettingValue
 import com.catsmoker.app.features.gamingtools.engine.parsers.DexoptStatusParser
@@ -25,6 +26,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -45,6 +48,53 @@ sealed class GamingModeState {
  */
 data class GamingModeReport(
     val fixedPerformance: Boolean = false,
+    /**
+     * Whether Qualcomm's vendor GPU mode was confirmed at `performance` (with
+     * `vendor.gfx.low_quality` at `1`) by reading both properties back.
+     *
+     * The reference project ships a native root daemon for exactly this payload
+     * (`referance/spoofdevice/GameUnlocker-main/cpp/controller.cpp`, read in full: a daemon on an
+     * abstract UNIX socket that sets the two properties while a whitelisted game process is
+     * connected and restores them when the last one exits). The daemon itself is not portable
+     * here — opening the connection from inside the game needs Zygisk injection — but its payload
+     * is, and Gaming Mode is this app's equivalent lifecycle: applied on activation, restored from
+     * the snapshot on deactivation. The daemon logs its `setprop` and never reads the property
+     * back; this reports the device's answer instead. Its `isQualcomm()` `ro.hardware` prefix
+     * table is deliberately not ported — the property's own existence is the gate, and a curated
+     * chipset-name list goes stale the same way a curated module-id list does.
+     *
+     * null when the device carries neither property (every non-Qualcomm SoC) — not applicable
+     * rather than failed, so the report row is omitted.
+     */
+    val gpuPerformanceMode: Boolean? = null,
+    /**
+     * Whether Qualcomm's `debug.vendor.qti.game.fps` hint was confirmed at the panel's measured
+     * peak by reading the property back.
+     *
+     * The reference sets both this and its `persist.` twin to a hard-coded 120 at boot in
+     * `post-fs-data.sh` (`referance/spoofdevice/GameUnlocker-main/common/post-fs-data.sh`, read
+     * in full — those two `setprop` lines are that file's whole payload). Three deliberate
+     * divergences:
+     *  - **Session, not boot.** Gaming Mode is this app's lifecycle — the hint is applied on
+     *    activation and the prior value restored from the snapshot on deactivation, the same
+     *    contract as every other switch here.
+     *  - **The panel's measured peak, not a hard-coded 120.** The same `maxHz` the refresh-rate
+     *    lock verified is what gets hinted; 120 on a 90 Hz panel would be a number the hardware
+     *    cannot honor.
+     *  - **The `persist.` twin is deliberately not set.** `setprop` cannot delete a property, so
+     *    a `persist.vendor.qti.game.fps` that did not exist would become a permanent,
+     *    reboot-surviving, device-wide change that deactivation could overwrite but never
+     *    remove — exactly the class of change the Magisk channel's narrowing rejected. The
+     *    `debug.` prop is reversible in the only way Android offers: a reboot clears the debug
+     *    property area. Until then, a hint that did not exist before stays hinting the panel's
+     *    own peak — bounded, and stated here rather than hidden.
+     *
+     * null when the device's own property dump carries no `ro.vendor.qti.*` property (every
+     * non-Qualcomm SoC) — not applicable, so the report row is omitted. The gate is the dump
+     * itself rather than the reference's `isQualcomm()` `ro.hardware` prefix table, for the same
+     * reason [gpuPerformanceMode] gives: a curated chipset list goes stale.
+     */
+    val qtiGameFps: Boolean? = null,
     /** Refresh rate the panel was actually pinned to, or null when the ROM ignored the keys. */
     val lockedRefreshHz: Int? = null,
     val touchResponseBoost: Boolean = false,
@@ -73,6 +123,16 @@ data class GamingModeReport(
      * omitted rather than shown as refused.
      */
     val gameInterventionApplied: Boolean? = null,
+    /**
+     * Whether the second-layer notification suppression is armed.
+     *
+     * null means the user has not granted notification access, so
+     * [GamingNotificationListener] is never bound — "not applicable", not "failed". true means
+     * the listener is connected and cancelling; each individual cancellation is best-effort,
+     * so the field reports the layer being armed rather than promising every notification was
+     * swallowed.
+     */
+    val notificationSuppression: Boolean? = null,
     val unavailable: List<String> = emptyList()
 )
 
@@ -168,6 +228,16 @@ class GamingEngine(
     private val _report = MutableStateFlow(GamingModeReport())
     val report: StateFlow<GamingModeReport> = _report.asStateFlow()
 
+    /**
+     * Whether [GamingNotificationListener] should be cancelling notifications right now.
+     *
+     * Read by the listener (which the system binds in this same process whenever the user has
+     * granted notification access), set only by activation, deactivation and the boot-time
+     * restore of a persisted active mode — never by the listener itself.
+     */
+    private val _notificationSuppressionActive = MutableStateFlow(false)
+    val notificationSuppressionActive: StateFlow<Boolean> = _notificationSuppressionActive.asStateFlow()
+
     private val _isFixedPerformanceMode = MutableStateFlow(value = false)
     val isFixedPerformanceMode: StateFlow<Boolean> = _isFixedPerformanceMode.asStateFlow()
 
@@ -183,6 +253,16 @@ class GamingEngine(
     private val _boosterState = MutableStateFlow(BoosterState())
     val boosterState: StateFlow<BoosterState> = _boosterState.asStateFlow()
 
+    /**
+     * Finished sweeps, newest last, persisted across process death by [BoosterHistoryStore].
+     *
+     * The in-memory booster log dies with the process; this is the "what did the last boost
+     * actually do" that survives. Loaded off the main thread in [init], since reading the file
+     * is real disk I/O however small.
+     */
+    private val _boosterHistory = MutableStateFlow<List<BoosterRun>>(emptyList())
+    val boosterHistory: StateFlow<List<BoosterRun>> = _boosterHistory.asStateFlow()
+
     private val _animationScales = MutableStateFlow(Triple(1f, 1f, 1f))
     val animationScales: StateFlow<Triple<Float, Float, Float>> = _animationScales.asStateFlow()
 
@@ -196,6 +276,24 @@ class GamingEngine(
      * second Start could begin walking the package list alongside the first.
      */
     private val boosterActive = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Serializes Gaming Mode toggles.
+     *
+     * The switch can be driven from three places at once — the in-app card, the foreground
+     * service's notification Stop button, and `onTaskRemoved` when the app is swiped away — and
+     * enable/disable both read-modify-write the same `affected_pkgs` record. Interleaved, an
+     * enable's suspends land after a disable's clear and no later revert knows about them, which
+     * leaves apps frozen with an empty record: exactly the "still suspended after turning it
+     * off" leak.
+     */
+    private val toggleMutex = Mutex()
+
+    private val boosterHistoryStore = BoosterHistoryStore(context)
+
+    /** Mode and start time of the sweep in flight, for its own history entry when it ends. */
+    @Volatile private var activeBoosterMode: String? = null
+    @Volatile private var activeBoosterStartedAt: Long = 0L
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -211,6 +309,9 @@ class GamingEngine(
         if (isActive) {
             _state.value = GamingModeState.Active
             _isFixedPerformanceMode.value = true
+            // A mode that survived process death keeps its suppression layer: the flag is what
+            // the listener reads, and it has no persisted state of its own to restore from.
+            _notificationSuppressionActive.value = isNotificationListenerEnabled()
             scope.launch { recoverPersistedState() }
         } else if (isFixedPerf) {
             _isFixedPerformanceMode.value = true
@@ -221,11 +322,23 @@ class GamingEngine(
         _backgroundProcessLimit.value = getGlobalString("activity_manager_constants")?.contains("max_cached_processes=1") == true
 
         refreshAnimationScales()
+
+        scope.launch { _boosterHistory.value = boosterHistoryStore.load() }
     }
 
     private fun getGlobalInt(key: String): Int {
         return try { android.provider.Settings.Global.getInt(context.contentResolver, key, 0) } catch (_: Exception) { 0 }
     }
+
+    /**
+     * Whether the user has granted this app notification access, which is what decides the
+     * system will ever bind [GamingNotificationListener]. Reported as the difference between
+     * "armed" and "not applicable" in [GamingModeReport.notificationSuppression].
+     */
+    private fun isNotificationListenerEnabled(): Boolean =
+        androidx.core.app.NotificationManagerCompat
+            .getEnabledListenerPackages(context)
+            .contains(context.packageName)
 
     private fun getGlobalString(key: String): String? {
         return android.provider.Settings.Global.getString(context.contentResolver, key)
@@ -279,8 +392,12 @@ class GamingEngine(
         "com.microsoft.deviceintegrationservice"  // ThermalInfoService bridge
     )
 
-    private val vivoGameCubeApps = "game_cube_apps"
-    private val vivoSpeedModeApps = "speed_mode_apps"
+    // The vivo whitelist keys moved to [OemPackageResolver] (with two more the reference writes
+    // and this engine used to skip); the constants there are the same strings these keys were.
+    private val vivoGameCubeApps = OemPackageResolver.KEY_GAME_CUBE_APPS
+    private val vivoSpeedModeApps = OemPackageResolver.KEY_SPEED_MODE_APPS
+    private val vivoHighRefreshRateApps = OemPackageResolver.KEY_VIVO_HIGH_REFRESH_RATE_APPS
+    private val vivoScreenRefreshRateAppsList = OemPackageResolver.KEY_VIVO_SCREEN_REFRESH_RATE_APPS_LIST
 
     private val hardWhitelist = setOf(
         "moe.shizuku.privileged.api",
@@ -289,42 +406,44 @@ class GamingEngine(
     )
 
     suspend fun toggleGamingMode(active: Boolean, packageName: String? = null) {
-        withContext(Dispatchers.IO) {
-            if (active) {
-                enableGamingMode(packageName)
-            } else {
-                disableGamingMode()
+        toggleMutex.withLock {
+            withContext(Dispatchers.IO) {
+                if (active) {
+                    enableGamingMode(packageName)
+                } else {
+                    disableGamingMode()
+                }
             }
         }
     }
 
     private suspend fun enableGamingMode(packageName: String?) {
-        _state.value = GamingModeState.Enabling(0f, "Initializing…")
+        _state.value = GamingModeState.Enabling(0f, context.getString(R.string.gt_eng_init))
         shellRunner.refreshShizukuPermission()
         val isRoot = shellRunner.isRootAvailable()
         val hasShizuku = shellRunner.shizukuHasPermission.value
         if (!isRoot && !hasShizuku) {
-            _state.value = GamingModeState.Error("Root or Shizuku permission required")
+            _state.value = GamingModeState.Error(context.getString(R.string.gt_eng_no_priv))
             return
         }
         try {
-            _state.value = GamingModeState.Enabling(0.05f, "Capturing system snapshot…")
+            _state.value = GamingModeState.Enabling(0.05f, context.getString(R.string.gt_eng_snapshot))
             // Read the user's real values first — before the cache trim, the suspends and every
             // `settings put` below — so deactivation restores their configuration and not ours.
             val restrictedBefore = runCatching { backgroundDataRestrictor.isEngaged() }
                 .getOrDefault(false)
             if (!captureAndSaveSnapshot(packageName)) {
-                _state.value = GamingModeState.Error("Could not read current system settings")
+                _state.value = GamingModeState.Error(context.getString(R.string.gt_eng_snapshot_fail))
                 return
             }
             val unavailable = mutableListOf<String>()
 
-            _state.value = GamingModeState.Enabling(0.15f, "Trimming system caches…")
+            _state.value = GamingModeState.Enabling(0.15f, context.getString(R.string.gt_eng_trim))
             execute("pm trim-caches 4G")
             execute("am compact background")
             runCatching { execute("cmd pinner repin /system/framework/framework.jar") }
 
-            _state.value = GamingModeState.Enabling(0.35f, "Suspending background apps…")
+            _state.value = GamingModeState.Enabling(0.35f, context.getString(R.string.gt_eng_suspend))
             val targets = getSuspendTargets(packageName)
             val currentlyAffected = prefs.getStringSet("affected_pkgs", emptySet())?.toMutableSet() ?: mutableSetOf()
             var suspendedNow = 0
@@ -335,8 +454,7 @@ class GamingEngine(
                 // this set, so a package listed here that was never frozen makes the revert lie —
                 // and a package frozen but not listed would be left frozen for good.
                 val result = shellRunner.execSafeResult("pm", "suspend", "--user", "0", pkg)
-                val refused = result.stdout.contains("state: false", ignoreCase = true)
-                if (result.isSuccess && !refused) {
+                if (SuspendVerdict.isSuspendConfirmed(result.exitCode, result.stdout)) {
                     currentlyAffected.add(pkg)
                     suspendedNow++
                 } else {
@@ -345,10 +463,10 @@ class GamingEngine(
             }
             prefs.edit { putStringSet("affected_pkgs", currentlyAffected) }
             if (suspendFailures > 0) {
-                unavailable += "$suspendFailures apps could not be paused"
+                unavailable += context.getString(R.string.gt_eng_un_suspend, suspendFailures)
             }
 
-            _state.value = GamingModeState.Enabling(0.6f, "Configuring Focus Mode…")
+            _state.value = GamingModeState.Enabling(0.6f, context.getString(R.string.gt_eng_focus))
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             var dndEngaged = false
             if (nm.isNotificationPolicyAccessGranted) {
@@ -357,56 +475,81 @@ class GamingEngine(
                 // back on the next line often still returns the old value — that race is why DND
                 // "sometimes failed" while actually being applied. Poll briefly instead.
                 dndEngaged = awaitInterruptionFilter(nm, NotificationManager.INTERRUPTION_FILTER_NONE)
-                if (!dndEngaged) unavailable += "Silencing notifications — your phone did not turn it on"
+                if (!dndEngaged) unavailable += context.getString(R.string.gt_eng_un_dnd_off)
             } else {
-                unavailable += "Silencing notifications — this app has not been allowed to do that yet"
+                unavailable += context.getString(R.string.gt_eng_un_dnd_perm)
             }
 
-            _state.value = GamingModeState.Enabling(0.9f, "Applying hardware locks…")
+            // Second layer beyond DND, from the reference's GamingNotificationListener: some
+            // OEM skins post their own alerts around the interruption filter, and cancelling
+            // the notification directly does not depend on the filter being honoured. Arming is
+            // all activation does — the listener (bound by the system only once the user has
+            // granted notification access) does the cancelling, including a purge of what is
+            // already on screen.
+            val notificationSuppression = isNotificationListenerEnabled()
+            _notificationSuppressionActive.value = notificationSuppression
+
+            _state.value = GamingModeState.Enabling(0.9f, context.getString(R.string.gt_eng_hw))
             val maxHz = refreshRates.getMaxHardwareRefreshRate().toInt()
             val peakOk = putSettingVerified("system", "peak_refresh_rate", maxHz.toString())
             val minOk = putSettingVerified("system", "min_refresh_rate", maxHz.toString())
             val lockedHz = if (peakOk || minOk) maxHz else null
             if (lockedHz == null) {
-                unavailable += "Holding the screen at its fastest speed — your phone ignores that setting"
+                unavailable += context.getString(R.string.gt_eng_un_refresh)
             }
             // Touch sampling boost. Only OEMs that ship the key honour it; captureAndSaveSnapshot
             // already recorded the old value, so disableGamingMode puts it back.
             val touchOk = putSettingVerified("system", "touch_response_speed", "2")
-            if (!touchOk) unavailable += "Faster touch — your phone does not have that setting"
+            if (!touchOk) unavailable += context.getString(R.string.gt_eng_un_touch)
 
             val fixedPerfOk = shellRunner
                 .execSafeResult("cmd", "power", "set-fixed-performance-mode-enabled", "true")
                 .isSuccess
-            if (!fixedPerfOk) unavailable += "Steady speed mode — your phone refused it"
+            if (!fixedPerfOk) unavailable += context.getString(R.string.gt_eng_un_fixed)
+
+            // Qualcomm's vendor GPU mode. The payload is the reference daemon's whole job (see
+            // [GamingModeReport.gpuPerformanceMode] for the lineage); gated on the property
+            // existing at all, so non-Qualcomm silicon is "not applicable" rather than a refused
+            // switch it never had.
+            val gpuPerfOk = applyVendorGpuPerformance()
+            if (gpuPerfOk == false) {
+                unavailable += context.getString(R.string.gt_eng_un_gpu)
+            }
+
+            // Qualcomm's game FPS hint, from the same reference's boot script (see
+            // [GamingModeReport.qtiGameFps] for the lineage and the persist-twin decision).
+            val qtiFpsOk = applyQtiGameFpsHint(maxHz)
+            if (qtiFpsOk == false) {
+                unavailable += context.getString(R.string.gt_eng_un_qti)
+            }
 
             // The two developer options, applied through the same verified helpers the Developer
             // Options card uses — so the switches there and the state here can never disagree.
-            _state.value = GamingModeState.Enabling(0.92f, "Applying developer options…")
+            _state.value = GamingModeState.Enabling(0.92f, context.getString(R.string.gt_eng_dev))
             val discardOk = toggleAlwaysFinishActivities(true)
             if (!discardOk) {
-                unavailable += "Closing apps as soon as you leave them — the setting would not stay"
+                unavailable += context.getString(R.string.gt_eng_un_discard)
             }
             val processLimitOk = toggleBackgroundProcessLimit(true)
             if (!processLimitOk) {
-                unavailable += "Limiting background apps — the setting would not stay"
+                unavailable += context.getString(R.string.gt_eng_un_limit)
             }
 
             // Metered-background data. Left entirely alone when the user's own switch was already on:
             // engaging it again would make deactivation turn off a restriction we did not own.
-            _state.value = GamingModeState.Enabling(0.95f, "Restricting background data…")
+            _state.value = GamingModeState.Enabling(0.95f, context.getString(R.string.gt_eng_data))
             var backgroundDataRestricted: Boolean? = null
             if (restrictedBefore) {
-                unavailable += "Stopping other apps using data was already on, so it was left the way you had it"
+                unavailable += context.getString(R.string.gt_eng_un_data_on)
             } else {
                 val outcome = runCatching {
                     backgroundDataRestrictor.enable(listOfNotNull(packageName))
                 }.getOrNull()
                 backgroundDataRestricted = outcome?.success == true
                 if (outcome == null) {
-                    unavailable += "Stopping other apps using data — your phone would not answer"
+                    unavailable += context.getString(R.string.gt_eng_un_data_silent)
                 } else if (!outcome.success) {
-                    unavailable += "Stopping other apps using data: ${outcome.message}"
+                    unavailable += context.getString(R.string.gt_eng_un_data_fail, outcome.message)
                 }
             }
 
@@ -426,18 +569,32 @@ class GamingEngine(
                     val outcome = gameInterventions.apply(packageName, maxHz)
                     gameInterventionApplied = outcome.applied
                     if (!outcome.applied) {
-                        unavailable += "Raising the game's own frame cap — your phone " +
-                            (outcome.refusal?.let { "said no: $it" } ?: "did not keep the setting")
+                        unavailable += context.getString(
+                            R.string.gt_eng_un_framecap,
+                            outcome.refusal?.let { context.getString(R.string.gt_eng_un_framecap_no, it) }
+                                ?: context.getString(R.string.gt_eng_un_framecap_kept)
+                        )
                     }
                 }
             }
             execute("cmd deviceidle force-idle")
             execute("am kill-all")
 
-            prefs.edit { putBoolean("is_active", true) }
+            prefs.edit {
+                putBoolean("is_active", true)
+                // Fixed performance mode and `cmd game set` can leave the thermal service in an
+                // overridden state after the mode is off (some vendor HALs keep the override
+                // until it is explicitly cleared). Only those two paths set this flag, so the
+                // deactivation-side reset runs exactly when there is something to undo.
+                if (fixedPerfOk || networkWhitelisted == true) {
+                    putBoolean("thermal_recovery_needed", true)
+                }
+            }
             _isFixedPerformanceMode.value = fixedPerfOk
             _report.value = GamingModeReport(
                 fixedPerformance = fixedPerfOk,
+                gpuPerformanceMode = gpuPerfOk,
+                qtiGameFps = qtiFpsOk,
                 lockedRefreshHz = lockedHz,
                 touchResponseBoost = touchOk,
                 suspendedPackages = suspendedNow,
@@ -448,11 +605,14 @@ class GamingEngine(
                 processLimit = processLimitOk,
                 backgroundDataRestricted = backgroundDataRestricted,
                 gameInterventionApplied = gameInterventionApplied,
+                // false means "not granted", which the report renders as absent rather than
+                // refused — the user has simply not switched this layer on.
+                notificationSuppression = if (notificationSuppression) true else null,
                 unavailable = unavailable
             )
             _state.value = GamingModeState.Active
         } catch (e: Exception) {
-            _state.value = GamingModeState.Error(e.message ?: "Activation failed")
+            _state.value = GamingModeState.Error(e.message ?: context.getString(R.string.gt_eng_activation_fail))
         }
     }
 
@@ -481,20 +641,100 @@ class GamingEngine(
 
     private suspend fun disableGamingMode() {
         _state.value = GamingModeState.Disabling
-        val affected = prefs.getStringSet("affected_pkgs", emptySet()) ?: emptySet()
-        for (pkg in affected) {
-            execute("pm unsuspend --user 0 $pkg")
+        // First, before any lever is reverted: the moment suppression stops, notifications
+        // arrive normally again, and a device busy reporting its own restoration would have
+        // its reports eaten by the layer this mode switched on.
+        _notificationSuppressionActive.value = false
+        // Anything gathered here survives into the report even when a later step throws, so a
+        // half-finished revert still says what it did not get to.
+        val revertProblems = mutableListOf<String>()
+        try {
+            // Every unsuspend is verified by what the shell answered — the same standard
+            // activation holds suspends to. A package that refused to wake stays in the record
+            // instead of being deleted from it, so the next deactivation retries exactly the
+            // leftovers rather than forgetting frozen apps. Dropping the whole set up front is
+            // what made one refused unsuspend a permanently suspended app with no trace.
+            //
+            // The sweep covers the whole suspend-target universe, not just the record: sessions
+            // reverted by older builds deleted their record before verifying, so their leftovers
+            // have no entry in `affected_pkgs`. Waking an already-awake package is a confirmed
+            // no-op, which is what makes this blind sweep safe — it can only wake our own past
+            // leaks. `pm` takes a single package per call, so each chunk is N commands chained
+            // with `;` in one fork (the same batching BackgroundDataRestrictor uses for
+            // netpolicy); a refused chunk falls back to per-package isolation rather than
+            // retaining the whole chunk as still suspended.
+            val affected = prefs.getStringSet("affected_pkgs", emptySet()) ?: emptySet()
+            val stillSuspended = mutableSetOf<String>()
+            for (chunk in (affected + getSuspendTargets(null)).distinct().chunked(UNSUSPEND_BATCH_SIZE)) {
+                if (chunk.size == 1) {
+                    if (!unsuspendOne(chunk[0])) stillSuspended.add(chunk[0])
+                    continue
+                }
+                val chained = chunk.joinToString("; ") { "pm unsuspend --user 0 $it" }
+                val batchResult = runCatching { shellRunner.execResult(chained) }.getOrNull()
+                if (batchResult != null &&
+                    batchResult.isSuccess &&
+                    SuspendVerdict.isUnsuspendConfirmed(batchResult.exitCode, batchResult.stdout)
+                ) continue
+                for (pkg in chunk) {
+                    if (!unsuspendOne(pkg)) stillSuspended.add(pkg)
+                }
+            }
+            if (stillSuspended.isEmpty()) {
+                prefs.edit { remove("affected_pkgs") }
+            } else {
+                prefs.edit { putStringSet("affected_pkgs", stillSuspended) }
+                revertProblems +=
+                    context.getString(R.string.gt_eng_still_suspended, stillSuspended.size)
+            }
+            execute("cmd deviceidle unforce")
+            execute("cmd power set-fixed-performance-mode-enabled false")
+            // Do Not Disturb is restored inside revertFromSnapshot, from the filter that was recorded
+            // before activation — not to INTERRUPTION_FILTER_ALL, which would cancel a DND the user set.
+            revertProblems += revertFromSnapshot()
+            val thermalRefusal = if (!recoverThermalOverrideIfNeeded()) {
+                context.getString(R.string.gt_eng_thermal)
+            } else {
+                null
+            }
+            // Deactivation normally clears the report, but a refused step is the device's own
+            // refusal text and belongs in front of the user rather than in a silent state change.
+            _report.value = GamingModeReport(unavailable = revertProblems + listOfNotNull(thermalRefusal))
+        } catch (e: Exception) {
+            revertProblems += context.getString(R.string.gt_eng_revert_fail, e.message ?: e.javaClass.simpleName)
+            _report.value = GamingModeReport(unavailable = revertProblems)
+        } finally {
+            prefs.edit { putBoolean("is_active", false); putBoolean("fixed_perf_manual", false) }
+            _isFixedPerformanceMode.value = false
+            _state.value = GamingModeState.Idle
         }
-        prefs.edit { remove("affected_pkgs") }
-        execute("cmd deviceidle unforce")
-        execute("cmd power set-fixed-performance-mode-enabled false")
-        // Do Not Disturb is restored inside revertFromSnapshot, from the filter that was recorded
-        // before activation — not to INTERRUPTION_FILTER_ALL, which would cancel a DND the user set.
-        revertFromSnapshot()
-        prefs.edit().putBoolean("is_active", false).putBoolean("fixed_perf_manual", false).apply()
-        _isFixedPerformanceMode.value = false
-        _report.value = GamingModeReport()
-        _state.value = GamingModeState.Idle
+    }
+
+    /**
+     * Clears any thermal override the session may have left behind.
+     *
+     * Fixed performance mode and the GameManager game mode (`cmd game set`) can leave the
+     * thermal service holding an override after every other lever is reverted — on some vendor
+     * HALs the override stays engaged until it is explicitly cleared, which presents as the
+     * phone running hot long after Gaming Mode is off. Activation records that one of those
+     * paths was accepted ([thermal_recovery_needed]); this runs once, on deactivation, and
+     * clears the flag only when `cmd thermalservice reset` actually answered with success.
+     *
+     * Modelled on the reference project's `EsportsOptimizationEngine.recoverThermalOverrideIfNeeded`
+     * (`referance/gamingtools/booster`): guarded by a needs-recovery flag rather than run
+     * unconditionally, judged by the exit code, and idempotent — a reset that never became
+     * needed is a success, not a skipped failure.
+     *
+     * @return false when a reset was needed and the device refused it.
+     */
+    private suspend fun recoverThermalOverrideIfNeeded(): Boolean {
+        if (!prefs.getBoolean("thermal_recovery_needed", false)) return true
+        val result = runCatching {
+            shellRunner.execSafeResult("cmd", "thermalservice", "reset")
+        }.getOrNull() ?: return false
+        if (!result.isSuccess) return false
+        prefs.edit { remove("thermal_recovery_needed") }
+        return true
     }
 
     /**
@@ -591,14 +831,13 @@ class GamingEngine(
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             return FixedPerformanceOutcome(
                 accepted = false,
-                message = "Your phone is too old for this. It needs Android 11 and yours is Android " +
-                    "${Build.VERSION.RELEASE}."
+                message = context.getString(R.string.gt_eng_fp_old, Build.VERSION.RELEASE)
             )
         }
         if (!shellRunner.hasPrivilege()) {
             return FixedPerformanceOutcome(
                 accepted = false,
-                message = "Needs root or Shizuku. Android does not let a normal app change this."
+                message = context.getString(R.string.gt_needs_root_shizuku_change)
             )
         }
 
@@ -630,13 +869,15 @@ class GamingEngine(
             accepted = accepted,
             message = if (accepted) {
                 if (enabled) {
-                    "Your phone accepted it."
+                    context.getString(R.string.gt_eng_fp_ok)
                 } else {
-                    "Turned off."
+                    context.getString(R.string.gt_eng_fp_off)
                 }
             } else {
-                "Your phone said no: " +
-                    result.text.trim().ifBlank { "it gave no reason" }
+                context.getString(
+                    R.string.gt_eng_fp_no,
+                    result.text.trim().ifBlank { context.getString(R.string.gt_eng_fp_no_reason) }
+                )
             }
         )
     }
@@ -690,33 +931,43 @@ class GamingEngine(
      */
     suspend fun runArtOptimization(mode: String = "speed-profile", force: Boolean = false) {
         if (!boosterActive.compareAndSet(false, true)) {
-            addBoosterLog("⚠ This is already running.")
+            addBoosterLog(context.getString(R.string.gt_eng_booster_running))
             return
         }
         try {
             _boosterLog.value = emptyList()
             boosterCancelRequested.set(false)
+            activeBoosterMode = mode
+            activeBoosterStartedAt = System.currentTimeMillis()
             _boosterState.value = BoosterState(isRunning = true, outcome = BoosterOutcome.Running)
-            addBoosterLog("🚀 Starting${if (force) " — redoing apps that are already done" else ""}…")
+            addBoosterLog(
+                if (force) context.getString(R.string.gt_eng_booster_start_force)
+                else context.getString(R.string.gt_eng_booster_start)
+            )
 
             // `cmd package compile` is refused for other packages without a privileged shell.
             // Checking first means the log says why nothing happened, instead of listing apps that
             // were never touched and then reporting a success that never took place.
             if (!shellRunner.hasPrivilege()) {
-                fail(BoosterOutcome.Unavailable(NO_PRIVILEGE_REASON), "❌ $NO_PRIVILEGE_REASON")
+                val reason = context.getString(R.string.gt_eng_booster_no_priv)
+                fail(BoosterOutcome.Unavailable(reason), context.getString(R.string.gt_eng_booster_unavail, reason))
                 return
             }
 
-            val apps = eligibleBoosterPackages()
+            val apps = eligibleBoosterPackages(mode, force)
             if (apps.isEmpty()) {
-                fail(BoosterOutcome.Unavailable(NO_APPS_REASON), "❌ $NO_APPS_REASON")
+                val reason = context.getString(R.string.gt_eng_booster_no_apps)
+                fail(BoosterOutcome.Unavailable(reason), context.getString(R.string.gt_eng_booster_unavail, reason))
                 return
             }
-            addBoosterLog("📦 Found ${apps.size} apps to work on.")
+            addBoosterLog(context.getString(R.string.gt_eng_booster_found, apps.size))
             _boosterState.update { it.copy(totalCount = apps.size) }
 
             val useRoot = shellRunner.isRootAvailable()
-            addBoosterLog(if (useRoot) "🔑 Using root." else "🔑 Using Shizuku.")
+            addBoosterLog(
+                if (useRoot) context.getString(R.string.gt_eng_booster_root)
+                else context.getString(R.string.gt_eng_booster_shizuku)
+            )
 
             // Without -f the platform skips an app that is already in the requested filter, so ask
             // it up front what each app is compiled with and say which ones are being skipped.
@@ -726,23 +977,41 @@ class GamingEngine(
                 if (boosterCancelRequested.get()) return
 
                 if (!force && currentStatuses[pkg] == mode) {
-                    addBoosterLog("⏭ Already done: $pkg")
+                    addBoosterLog(context.getString(R.string.gt_eng_booster_skip_done, pkg))
+                    _boosterState.update { it.copy(currentPackage = null, skippedCount = it.skippedCount + 1) }
+                    continue
+                }
+
+                // A `verify` status means the app has never been opened, so no runtime profile
+                // exists yet and a speed-profile compile has nothing to work with — the platform's
+                // own first-use dexopt will do the same job. "Nothing to do yet", not "already
+                // done" and not a failure; forced runs compile them anyway.
+                if (!force && mode == "speed-profile" && currentStatuses[pkg] == "verify") {
+                    addBoosterLog(context.getString(R.string.gt_eng_booster_skip_verify, pkg))
                     _boosterState.update { it.copy(currentPackage = null, skippedCount = it.skippedCount + 1) }
                     continue
                 }
 
                 _boosterState.update { it.copy(currentPackage = pkg) }
-                addBoosterLog("⚡ Working on: $pkg")
+                addBoosterLog(context.getString(R.string.gt_eng_booster_working, pkg))
                 val outcome = runCompileCommand(mode, force, pkg, useRoot)
 
                 // A cancel that landed mid-compile: the partial result is not a failure of this app.
                 if (boosterCancelRequested.get()) return
 
                 if (outcome.succeeded) {
-                    addBoosterLog("✓ $pkg${outcome.detail.takeIf { it.isNotBlank() }?.let { " — $it" } ?: ""}")
+                    addBoosterLog(
+                        context.getString(
+                            R.string.gt_eng_booster_ok,
+                            pkg,
+                            outcome.detail.takeIf { it.isNotBlank() }
+                                ?.let { context.getString(R.string.gt_eng_booster_ok_detail, it) }
+                                .orEmpty()
+                        )
+                    )
                     _boosterState.update { it.copy(currentPackage = null, optimizedCount = it.optimizedCount + 1) }
                 } else {
-                    addBoosterLog("✗ $pkg — ${outcome.detail}")
+                    addBoosterLog(context.getString(R.string.gt_eng_booster_fail, pkg, outcome.detail))
                     _boosterState.update { it.copy(currentPackage = null, failedCount = it.failedCount + 1) }
                 }
             }
@@ -753,51 +1022,100 @@ class GamingEngine(
 
             val finished = _boosterState.value
             addBoosterLog(
-                "✅ Done — ${finished.optimizedCount} improved, " +
-                    "${finished.skippedCount} were already fine, ${finished.failedCount} could not be done."
+                context.getString(
+                    R.string.gt_eng_booster_done,
+                    finished.optimizedCount,
+                    finished.skippedCount,
+                    finished.failedCount
+                )
             )
             _boosterState.value = finished.copy(
                 isRunning = false,
                 currentPackage = null,
                 outcome = BoosterOutcome.Completed
             )
+            recordBoosterRun("completed")
         } catch (e: CancellationException) {
             markBoosterCancelled()
             throw e
         } catch (e: Exception) {
             val reason = e.message ?: e.javaClass.simpleName
-            fail(BoosterOutcome.Failed(reason), "❌ Stopped because something went wrong: $reason")
+            fail(
+                BoosterOutcome.Failed(reason),
+                context.getString(R.string.gt_eng_booster_failed, reason)
+            )
         } finally {
             // Whatever happened, nothing is left compiling and a new run can start.
             if (boosterCancelRequested.get()) markBoosterCancelled()
             currentCompileProcess?.destroy()
             currentCompileProcess = null
             boosterActive.set(false)
+            activeBoosterMode = null
         }
+    }
+
+    /**
+     * Appends the finished run to the persisted history and the live flow, from the counts the
+     * state holds right now. Not a read-back of anything — the counts were accumulated from
+     * what the shell answered, which is the same standard a report row has to meet.
+     */
+    private fun recordBoosterRun(outcome: String) {
+        val mode = activeBoosterMode ?: return
+        val startedAt = activeBoosterStartedAt
+        if (startedAt <= 0L) return
+        val s = _boosterState.value
+        val run = BoosterRun(
+            startedAt = startedAt,
+            durationMs = System.currentTimeMillis() - startedAt,
+            mode = mode,
+            optimized = s.optimizedCount,
+            skipped = s.skippedCount,
+            failed = s.failedCount,
+            outcome = outcome
+        )
+        boosterHistoryStore.record(run)
+        _boosterHistory.update { it + run }
     }
 
     /** Ends the run with a stated reason instead of a silent stop. */
     private fun fail(outcome: BoosterOutcome, logLine: String) {
         addBoosterLog(logLine)
         _boosterState.update { it.copy(isRunning = false, currentPackage = null, outcome = outcome) }
+        // Only a run that actually started something is worth a history entry: Unavailable means
+        // the sweep never began, and recording it would bury the runs that did.
+        if (outcome is BoosterOutcome.Failed) recordBoosterRun("failed")
     }
 
     /**
      * The apps worth compiling: everything the user installed, plus any system app they added to
-     * their own game library.
+     * their own game library — with the two classes that can only waste a compile slot screened
+     * out by [BoosterPackageClassifier]: overlay/RRO packages (no meaningful dex; the platform
+     * refuses or no-ops them) and, for a `speed-profile` run, never-opened apps at status `verify`
+     * (no runtime profile yet, so a profile-guided compile has nothing to work with). Both are
+     * counted as [BoosterState.skippedCount] with their own log line — "nothing to do" is not
+     * "already done" and not a failure — and neither is filtered in a forced run, where the user
+     * explicitly asked for every package.
      */
-    private fun eligibleBoosterPackages(): List<String> {
+    private fun eligibleBoosterPackages(mode: String = "speed-profile", force: Boolean = false): List<String> {
         val userAdded = context.getSharedPreferences("AppPrefs", Context.MODE_PRIVATE)
             .getStringSet("user_games", emptySet()) ?: emptySet()
         return context.packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
             .asSequence()
             .filter { (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0 || it.packageName in userAdded }
-            .map { it.packageName }
+            .map { it.packageName to it }
             // Recompiling ourselves restarts this process and takes the sweep down with it. The
             // reference excludes its own package for the same reason.
-            .filter { it != context.packageName }
+            .filter { (pkg, _) -> pkg != context.packageName }
+            .filter { (pkg, info) ->
+                // The classifier reads the APK's own path — no shell call, no per-app fork. In a
+                // forced run every package the user asked for goes through, overlays included.
+                force || !BoosterPackageClassifier.isOverlayLike(pkg, info.sourceDir)
+            }
+            .map { (pkg, _) -> pkg }
             .distinct()
             .toList()
+            // The verify check needs the statuses, which come from one `dumpsys package dexopt`
+            // call the caller already makes; keep the filter there (see runArtOptimization).
     }
 
     /**
@@ -810,12 +1128,15 @@ class GamingEngine(
         // completed, unavailable, failed, or already cancelled — that stands: a Stop that arrives
         // in the moment after the last package must not rewrite a finished sweep as a cancelled one.
         if (current.outcome !is BoosterOutcome.Running) return
-        addBoosterLog("⏹ Stopped after ${current.processedCount} apps.")
+        addBoosterLog(context.getString(R.string.gt_eng_booster_stopped, current.processedCount))
         _boosterState.value = current.copy(
             isRunning = false,
             currentPackage = null,
             outcome = BoosterOutcome.Cancelled
         )
+        // "Cancelled after 12" is a different fact about the sweep than "completed", and the
+        // counts of how far it got are exactly what the history row is for.
+        recordBoosterRun("cancelled")
     }
 
     private suspend fun queryDexoptStatuses(): Map<String, String> {
@@ -877,7 +1198,7 @@ class GamingEngine(
         val text = output.trim()
         val lower = text.lowercase(java.util.Locale.US)
         return when {
-            exitCode != 0 -> CompileOutcome(false, text.ifBlank { "exit code $exitCode" })
+            exitCode != 0 -> CompileOutcome(false, text.ifBlank { context.getString(R.string.gt_eng_booster_exit, exitCode) })
             lower.startsWith("failure") || lower.contains("error:") -> CompileOutcome(false, text)
             else -> CompileOutcome(true, text.takeUnless { it.equals("Success", ignoreCase = true) }.orEmpty())
         }
@@ -889,7 +1210,7 @@ class GamingEngine(
      */
     suspend fun cancelArtOptimization() {
         if (!requestBoosterCancel()) {
-            addBoosterLog("ℹ Nothing is running right now.")
+            addBoosterLog(context.getString(R.string.gt_eng_booster_idle))
             return
         }
         // The platform forks dex2oat on our behalf, and it outlives the shell that asked for it.
@@ -1029,7 +1350,22 @@ class GamingEngine(
             pkg != activeGamePkg && pkg !in launcherPkgs && !isInLibrary &&
                 installedApps.any { it.packageName == pkg }
         }
-        return (userApps + googleApps).distinct()
+        // OEM bloat is FLAG_SYSTEM, so the user-app sweep above can never reach it — this list is
+        // the only path a preinstalled package has into the sweep. Curated per vendor in
+        // [OemPackageResolver] (the reference's OemPackageResolver.VIVO_SAFE_TO_SUSPEND, verbatim),
+        // and already disjoint from [systemCritical]/[gamingDaemons], whose load-bearing vivo
+        // processes must stay out.
+        val oemApps = OemPackageResolver.packagesToSuspend(
+            isVivoOrIqoo = isVivoOrIqoo(),
+            isInstalled = { pkg -> installedApps.any { it.packageName == pkg } }
+        ).filter { pkg ->
+            pkg != activeGamePkg && pkg !in launcherPkgs &&
+                pkg !in userGames &&
+                try {
+                    pm.getApplicationInfo(pkg, 0).category != ApplicationInfo.CATEGORY_GAME
+                } catch (_: Exception) { true }
+        }
+        return (userApps + googleApps + oemApps).distinct()
     }
 
     private fun getLauncherPackages(): Set<String> {
@@ -1083,6 +1419,11 @@ class GamingEngine(
         val isVivo = (packageName != null) && isVivoOrIqoo()
         val vivoCube = if (isVivo) getGlobalString(vivoGameCubeApps) else null
         val vivoSpeed = if (isVivo) getGlobalString(vivoSpeedModeApps) else null
+        // The two high-refresh-rate whitelist CSVs the reference also writes. Same null contract
+        // as the pair above: null when there is no game or the device is not vivo/iQOO, and a
+        // blank string when the key simply was not set (meaning "delete it again on the way out").
+        val vivoHighRefresh = if (isVivo) getGlobalString(vivoHighRefreshRateApps) else null
+        val vivoScreenRefresh = if (isVivo) getGlobalString(vivoScreenRefreshRateAppsList) else null
         // The game's own intervention-table entry, read *before* activation writes one, so the
         // revert can put back what was there or delete ours if nothing was. Game interventions
         // exist from Android 12 only; an unreadable answer is stored as null, which the revert
@@ -1094,6 +1435,17 @@ class GamingEngine(
                 is GameInterventions.OverlayValue.Unreadable -> null
             }
         } else null
+
+        // Qualcomm's vendor GPU properties, as the vendor booted with them. A blank property (the
+        // normal case on non-Qualcomm silicon) records existed = false, which both the
+        // activation-side gate and the revert read as "never touch this property".
+        val vendorGpuMode = propSettingValue(VENDOR_GPU_MODE)
+        val vendorGfxLowQuality = propSettingValue(VENDOR_GFX_LOW_QUALITY)
+        // The game FPS hint too. On a Qualcomm device that never set it this records
+        // existed = false — and the revert then leaves our hint in place until a reboot clears
+        // the debug property area, the one deletion Android offers. See the snapshot field's
+        // KDoc; recorded either way so a prior value is never lost.
+        val debugVendorQtiGameFps = propSettingValue(DEBUG_VENDOR_QTI_GAME_FPS)
 
         val snapshot = GamingOptimizationSnapshot(
             activeGamePackage = packageName,
@@ -1107,6 +1459,8 @@ class GamingEngine(
             uidWhitelistedBefore = uidWhitelistedBefore,
             vivoGameCubeApps = vivoCube,
             vivoSpeedModeApps = vivoSpeed,
+            vivoHighRefreshRateApps = vivoHighRefresh,
+            vivoScreenRefreshRateAppsList = vivoScreenRefresh,
             originalRingtoneVolume = currentVol,
             originalBrightnessMode = origBrightnessMode,
             originalRotation = origRotation,
@@ -1114,7 +1468,10 @@ class GamingEngine(
             activityManagerConstants = amConstants,
             backgroundDataRestrictedBefore = restrictedBefore,
             originalInterruptionFilter = originalFilter,
-            gameOverlay = gameOverlay
+            gameOverlay = gameOverlay,
+            vendorGpuMode = vendorGpuMode,
+            vendorGfxLowQuality = vendorGfxLowQuality,
+            debugVendorQtiGameFps = debugVendorQtiGameFps
         )
         prefs.edit { putString("last_snapshot", snapshot.toJson()) }
         return true
@@ -1192,10 +1549,14 @@ class GamingEngine(
             execute("cmd netpolicy add restrict-background-whitelist $uid")
             execute("cmd game set --mode performance --fps $maxHz $packageName")
             if (isVivoOrIqoo()) {
-                val cube = getGlobalString(vivoGameCubeApps) ?: ""
-                val speed = getGlobalString(vivoSpeedModeApps) ?: ""
-                execute("settings put global $vivoGameCubeApps ${appendToCsv(cube, packageName)}")
-                execute("settings put global $vivoSpeedModeApps ${appendToCsv(speed, packageName)}")
+                // All four whitelist CSVs the reference writes, not just the first two: the skin's
+                // high-refresh-rate lists decide whether the panel holds its peak for the game, so
+                // writing only the Game Cube pair left the game fast-pathed in one surface and an
+                // ordinary app in the other two. Snapshot already recorded each key's prior value.
+                for (key in listOf(vivoGameCubeApps, vivoSpeedModeApps, vivoHighRefreshRateApps, vivoScreenRefreshRateAppsList)) {
+                    val current = getGlobalString(key) ?: ""
+                    execute("settings put global $key ${appendToCsv(current, packageName)}")
+                }
             }
             // netpolicy has no read-back on its own, but the whitelist can be listed.
             return isUidWhitelisted(uid)
@@ -1204,9 +1565,17 @@ class GamingEngine(
         }
     }
 
-    private suspend fun revertFromSnapshot() {
-        val json = prefs.getString("last_snapshot", null) ?: return
-        val snapshot = GamingOptimizationSnapshot.fromJson(json) ?: return
+    /**
+     * Restores everything the snapshot recorded, reporting what refused to go back.
+     *
+     * @return human-readable problems for the deactivation report; empty when everything landed.
+     *   A missing or unparsable snapshot answers empty rather than accusing the device — there
+     *   is no record to restore from, so there is nothing to verify against.
+     */
+    private suspend fun revertFromSnapshot(): List<String> {
+        val json = prefs.getString("last_snapshot", null) ?: return emptyList()
+        val snapshot = GamingOptimizationSnapshot.fromJson(json) ?: return emptyList()
+        val problems = mutableListOf<String>()
         
         // Restore volume
         snapshot.originalRingtoneVolume?.let { vol ->
@@ -1244,9 +1613,17 @@ class GamingEngine(
             getGlobalString("activity_manager_constants").orEmpty().contains("max_cached_processes=1")
 
         // Lift the metered-background block only if this session put it there. When the user's own
-        // switch was already on before activation, turning it off here would be undoing their setting.
-        if (!snapshot.backgroundDataRestrictedBefore) {
-            runCatching { backgroundDataRestrictor.disable() }
+        // switch was already on before activation, turning it off here would be undoing their
+        // setting — unless a previous revert retained verified-still-blocked UIDs, which are
+        // ours to retry. The outcome is reported rather than dropped: a refused unblock that
+        // stays silent is another "still stopped after reverting".
+        if (!snapshot.backgroundDataRestrictedBefore || backgroundDataRestrictor.hasRetainedBlocks()) {
+            val dataOutcome = runCatching { backgroundDataRestrictor.disable() }.getOrNull()
+            if (dataOutcome == null) {
+                problems += context.getString(R.string.gt_eng_un_data_revert)
+            } else if (!dataOutcome.success) {
+                problems += dataOutcome.message
+            }
         }
 
         if (snapshot.activeGamePackage != null) {
@@ -1270,8 +1647,21 @@ class GamingEngine(
         if (isVivoOrIqoo() && (snapshot.activeGamePackage != null)) {
             restoreGlobalSetting(vivoGameCubeApps, snapshot.vivoGameCubeApps)
             restoreGlobalSetting(vivoSpeedModeApps, snapshot.vivoSpeedModeApps)
+            restoreGlobalSetting(vivoHighRefreshRateApps, snapshot.vivoHighRefreshRateApps)
+            restoreGlobalSetting(vivoScreenRefreshRateAppsList, snapshot.vivoScreenRefreshRateAppsList)
         }
+        // Qualcomm GPU mode, back to what the vendor booted with. Only when the snapshot recorded
+        // the property as existing — a blank one was never set, and setprop can neither create nor
+        // delete a property, so there is nothing an absent one could be restored *to*.
+        restoreProp(VENDOR_GPU_MODE, snapshot.vendorGpuMode)
+        restoreProp(VENDOR_GFX_LOW_QUALITY, snapshot.vendorGfxLowQuality)
+        // The game FPS hint. Same rule — but a hint that did not exist before cannot be deleted,
+        // so this returns it only when the vendor had one, and the created hint otherwise stays
+        // until the next reboot. That bounded leftover is stated in the snapshot field's KDoc and
+        // in GamingModeReport.qtiGameFps's, not hidden.
+        restoreProp(DEBUG_VENDOR_QTI_GAME_FPS, snapshot.debugVendorQtiGameFps)
         prefs.edit { remove("last_snapshot") }
+        return problems
     }
 
     private suspend fun restoreGlobalSetting(key: String, original: String?) {
@@ -1292,10 +1682,8 @@ class GamingEngine(
         return uid in BackgroundDataRestrictor.parseUidList(output)
     }
 
-    private fun appendToCsv(list: String, pkg: String): String {
-        val items = list.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-        return if (pkg in items) list else (items + pkg).joinToString(",")
-    }
+    /** CSV append now lives in [OemPackageResolver.appendPackage] (pure, and pinned by tests). */
+    private fun appendToCsv(list: String, pkg: String): String = OemPackageResolver.appendPackage(list, pkg)
 
     private fun upsertCsvKey(csv: String, key: String, value: String): String {
         val kept = csv.split(",")
@@ -1312,14 +1700,103 @@ class GamingEngine(
             .joinToString(",")
     }
 
-    private suspend fun restoreSetting(namespace: String, key: String, sv: SettingValue?) {
-        if (sv == null) return
+    /** One verified wake-up; false means still suspended, or the shell never answered. */
+    private suspend fun unsuspendOne(pkg: String): Boolean {
+        val result = runCatching {
+            shellRunner.execSafeResult("pm", "unsuspend", "--user", "0", pkg)
+        }.getOrNull() ?: return false
+        return SuspendVerdict.isUnsuspendConfirmed(result.exitCode, result.stdout)
+    }
+
+    private suspend fun restoreSetting(namespace: String, key: String, sv: SettingValue?) {        if (sv == null) return
         val cmd = if (sv.existed && sv.value.isNotBlank()) {
             "settings put $namespace $key ${sv.value}"
         } else {
             "settings delete $namespace $key"
         }
         execute(cmd)
+    }
+
+    /**
+     * Sets Qualcomm's vendor GPU properties for the duration of Gaming Mode and confirms them by
+     * read-back — the payload `GameUnlocker-main/cpp/controller.cpp` ships its daemon for, minus
+     * the daemon (see [GamingModeReport.gpuPerformanceMode]).
+     *
+     * @return null when the device carries neither property — not applicable, every non-Qualcomm
+     *   SoC — otherwise whether every property it does carry landed at its target value.
+     */
+    private suspend fun applyVendorGpuPerformance(): Boolean? {
+        val modePresent = readProp(VENDOR_GPU_MODE).isNotBlank()
+        val lowQualityPresent = readProp(VENDOR_GFX_LOW_QUALITY).isNotBlank()
+        if (!modePresent && !lowQualityPresent) return null
+        var confirmed = 0
+        var attempted = 0
+        if (modePresent) {
+            attempted++
+            if (setPropVerified(VENDOR_GPU_MODE, "performance")) confirmed++
+        }
+        if (lowQualityPresent) {
+            attempted++
+            if (setPropVerified(VENDOR_GFX_LOW_QUALITY, "1")) confirmed++
+        }
+        return confirmed == attempted
+    }
+
+    /**
+     * Hints Qualcomm's perf framework at [peakHz] through `debug.vendor.qti.game.fps`, the whole
+     * payload of `GameUnlocker-main/common/post-fs-data.sh` (see [GamingModeReport.qtiGameFps]
+     * for why the `persist.` twin is deliberately not set and why the value is measured rather
+     * than the reference's hard-coded 120).
+     *
+     * @return null when the device is not Qualcomm — not applicable — otherwise whether the
+     *   property read back at [peakHz].
+     */
+    private suspend fun applyQtiGameFpsHint(peakHz: Int): Boolean? {
+        if (!isQualcommDevice()) return null
+        return setPropVerified(DEBUG_VENDOR_QTI_GAME_FPS, peakHz.toString())
+    }
+
+    /**
+     * Whether the device's own property dump names a Qualcomm vendor property. The reference's
+     * `isQualcomm()` matched `ro.hardware` against a prefix table (qcom, kalama, taro, …); the
+     * dump itself is the measured fact — every Qualcomm device carries `ro.vendor.qti.*`
+     * properties because its whole vendor stack defines them — and it cannot go stale the way a
+     * chipset-name list does.
+     */
+    private suspend fun isQualcommDevice(): Boolean {
+        val dump = shellRunner.execSafeResult("getprop")
+        return dump.isSuccess && dump.stdout.contains("[ro.vendor.qti.")
+    }
+
+    /** @return the property's value, or "" when it is not set or could not be read. */
+    private suspend fun readProp(key: String): String {
+        val result = shellRunner.execSafeResult("getprop", key)
+        return if (result.isSuccess) result.stdout.trim() else ""
+    }
+
+    /**
+     * `setprop` prints nothing on success and its refusal goes to stderr, so — like
+     * `settings put` — the read-back is the only honest signal. Root only: a shell-uid Shizuku
+     * session cannot write vendor properties, and that surfaces here as a refusal rather than
+     * as silence.
+     */
+    private suspend fun setPropVerified(key: String, value: String): Boolean {
+        shellRunner.execSafeResult("setprop", key, value)
+        return readProp(key) == value
+    }
+
+    /** A system property as a [SettingValue]: blank is `existed = false`, a failed read is null. */
+    private suspend fun propSettingValue(key: String): SettingValue? {
+        val result = shellRunner.execSafeResult("getprop", key)
+        if (!result.isSuccess) return null
+        val value = result.stdout.trim()
+        return if (value.isEmpty()) SettingValue("", existed = false) else SettingValue(value, existed = true)
+    }
+
+    /** Puts a property back, only when the snapshot actually recorded it as existing. */
+    private suspend fun restoreProp(key: String, sv: SettingValue?) {
+        if (sv == null || !sv.existed || sv.value.isBlank()) return
+        shellRunner.execSafeResult("setprop", key, sv.value)
     }
 
     /**
@@ -1338,16 +1815,28 @@ class GamingEngine(
             val minOk = putSettingVerified("system", "min_refresh_rate", maxHz.toString())
             val lockedHz = if (peakOk || minOk) maxHz else null
             if (lockedHz == null) {
-                unavailable += "Holding the screen at its fastest speed — your phone ignores that setting"
+                unavailable += context.getString(R.string.gt_eng_un_refresh)
             }
 
             val touchOk = putSettingVerified("system", "touch_response_speed", "2")
-            if (!touchOk) unavailable += "Faster touch — your phone does not have that setting"
+            if (!touchOk) unavailable += context.getString(R.string.gt_eng_un_touch)
 
             val fixedPerfOk = shellRunner
                 .execSafeResult("cmd", "power", "set-fixed-performance-mode-enabled", "true")
                 .isSuccess
-            if (!fixedPerfOk) unavailable += "Steady speed mode — your phone refused it"
+            if (!fixedPerfOk) unavailable += context.getString(R.string.gt_eng_un_fixed)
+            // The Qualcomm GPU switch too, under the same re-assert-everything rule as the rest
+            // of this recovery — the snapshot still holds the vendor's originals, so the eventual
+            // deactivation restores them either way.
+            val gpuPerfOk = applyVendorGpuPerformance()
+            if (gpuPerfOk == false) {
+                unavailable += context.getString(R.string.gt_eng_un_gpu)
+            }
+            // The game FPS hint with the same rule; maxHz above is this run's measured peak.
+            val qtiFpsOk = applyQtiGameFpsHint(maxHz)
+            if (qtiFpsOk == false) {
+                unavailable += context.getString(R.string.gt_eng_un_qti)
+            }
             execute("cmd deviceidle force-idle")
 
             // OEM specific recovery
@@ -1362,11 +1851,11 @@ class GamingEngine(
             // user's originals from the previous process, so deactivation restores those either way.
             val discardOk = toggleAlwaysFinishActivities(true)
             if (!discardOk) {
-                unavailable += "Closing apps as soon as you leave them — the setting would not stay"
+                unavailable += context.getString(R.string.gt_eng_un_discard)
             }
             val processLimitOk = toggleBackgroundProcessLimit(true)
             if (!processLimitOk) {
-                unavailable += "Limiting background apps — the setting would not stay"
+                unavailable += context.getString(R.string.gt_eng_un_limit)
             }
 
             val snapshot = prefs.getString("last_snapshot", null)
@@ -1394,6 +1883,8 @@ class GamingEngine(
             _isFixedPerformanceMode.value = fixedPerfOk
             _report.value = GamingModeReport(
                 fixedPerformance = fixedPerfOk,
+                gpuPerformanceMode = gpuPerfOk,
+                qtiGameFps = qtiFpsOk,
                 lockedRefreshHz = lockedHz,
                 touchResponseBoost = touchOk,
                 // The suspends happened in the previous process; this set is the record of them and
@@ -1419,11 +1910,18 @@ class GamingEngine(
     private companion object {
         val WHITESPACE = Regex("\\s+")
 
-        const val NO_PRIVILEGE_REASON =
-            "Needs root or Shizuku. Android does not let a normal app do this to other apps, so " +
-                "nothing was run."
-        const val NO_APPS_REASON =
-            "There were no apps to work on — nothing you installed yourself, and no built-in app " +
-                "added to your games."
+        /** Packages per `pm unsuspend` fork in the deactivation sweep; mirrors UID_BATCH_SIZE. */
+        private const val UNSUSPEND_BATCH_SIZE = 25
+
+        /** Qualcomm's vendor GPU mode knob, and its texture-quality companion. */
+        const val VENDOR_GPU_MODE = "vendor.gpu.mode"
+        const val VENDOR_GFX_LOW_QUALITY = "vendor.gfx.low_quality"
+
+        /**
+         * Qualcomm's game FPS hint, set by Gaming Mode to the panel's measured peak. The
+         * `persist.vendor.qti.game.fps` twin from the reference's `post-fs-data.sh` is
+         * deliberately absent — see [GamingModeReport.qtiGameFps].
+         */
+        const val DEBUG_VENDOR_QTI_GAME_FPS = "debug.vendor.qti.game.fps"
     }
 }

@@ -1,0 +1,47 @@
+<resources>
+    <!-- Settings screen + update flow + support dialog. Language endonyms stay native in every locale. -->
+    <string name="sys_settings_title">Ajustes</string>
+    <string name="sys_settings_subtitle">Configuración y preferencias de la app.</string>
+    <string name="sys_section_general">General</string>
+    <string name="sys_ads_title">Activar anuncios</string>
+    <string name="sys_section_updates">Actualizaciones</string>
+    <string name="sys_updating">Descargando actualización…</string>
+    <string name="sys_check_updates">Buscar actualizaciones</string>
+    <string name="sys_auto_check">Buscar actualizaciones automáticamente</string>
+    <string name="sys_update_available">Actualización disponible: %1$s</string>
+    <string name="sys_update_prompt">Hay una nueva versión disponible. ¿Descargarla e instalarla ahora?</string>
+    <string name="sys_download">DESCARGAR</string>
+    <string name="sys_later">MÁS TARDE</string>
+    <string name="sys_section_management">Gestión</string>
+    <string name="sys_permissions_title">Permisos de la app</string>
+    <string name="sys_permissions_subtitle">Gestiona los permisos otorgados.</string>
+    <string name="sys_logs_title">Registros del sistema</string>
+    <string name="sys_logs_subtitle">Ver diagnósticos de la app y del sistema.</string>
+    <string name="sys_section_appearance">Apariencia</string>
+    <string name="sys_theme_title">Tema</string>
+    <string name="sys_theme_subtitle">Pantallas claras u oscuras.</string>
+    <string name="sys_theme_system">Predeterminado del sistema</string>
+    <string name="sys_theme_dark">Oscuro</string>
+    <string name="sys_theme_light">Claro</string>
+    <string name="sys_language_title">Idioma</string>
+    <string name="sys_language_subtitle">Idioma de la app. Se aplica al instante.</string>
+    <string name="sys_lang_system">Predeterminado del sistema</string>
+    <string name="sys_lang_english">English</string>
+    <string name="sys_lang_arabic">العربية</string>
+    <string name="sys_lang_spanish">Español</string>
+    <string name="sys_lang_chinese">中文 (简体)</string>
+    <string name="sys_checking_updates">Buscando actualizaciones…</string>
+    <string name="sys_no_releases">No se encontraron versiones en GitHub</string>
+    <string name="sys_up_to_date">La app está actualizada (v%1$s)</string>
+    <string name="sys_no_suitable_release">No se encontró una versión adecuada</string>
+    <string name="sys_update_check_failed">Error al buscar actualizaciones: %1$s</string>
+    <string name="sys_download_failed">Error de descarga: %1$s</string>
+    <string name="sys_support_title">Apoya al desarrollador</string>
+    <string name="sys_support_text">Dale una estrella al proyecto en GitHub y dona para apoyar al desarrollador en PayPal.</string>
+    <string name="sys_support_star">Estrella</string>
+    <string name="sys_support_donate">Donar</string>
+    <!-- First-run onboarding step one. -->
+    <string name="sys_first_run_title">Te damos la bienvenida a CatSmoker</string>
+    <string name="sys_first_run_subtitle">Elige el aspecto y el idioma de la app. Podrás cambiarlo luego en Ajustes.</string>
+    <string name="sys_continue">CONTINUAR</string>
+</resources>

@@ -424,7 +424,9 @@ class CrosshairOverlayService : Service() {
      */
     private fun buildNotification(): android.app.Notification {
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(if (isMoveMode) "Crosshair — moving" else "Crosshair Active")
+            .setContentTitle(
+                if (isMoveMode) getString(R.string.gt_svc_cross_moving) else getString(R.string.gt_svc_cross_active)
+            )
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
 
@@ -442,10 +444,10 @@ class CrosshairOverlayService : Service() {
         )
 
         if (isMoveMode) {
-            builder.setContentText("The crosshair is taking taps while you move it.")
+            builder.setContentText(getString(R.string.gt_svc_cross_taking))
             builder.addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
-                "Done moving",
+                getString(R.string.gt_svc_cross_done),
                 PendingIntent.getService(
                     this,
                     REQUEST_EXIT_MOVE_MODE,
@@ -472,7 +474,7 @@ class CrosshairOverlayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(CHANNEL_ID, "Crosshair Overlay", NotificationManager.IMPORTANCE_LOW)
+        val channel = NotificationChannel(CHANNEL_ID, getString(R.string.gt_svc_cross_channel), NotificationManager.IMPORTANCE_LOW)
         getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
     }
 

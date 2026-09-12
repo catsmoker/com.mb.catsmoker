@@ -15,6 +15,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.KeyEvent
 import androidx.core.content.ContextCompat
+import com.catsmoker.app.R
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -221,13 +222,17 @@ class AudioBoostController(private val context: Context) {
     }
 
     private fun deviceTypeLabel(type: Int): String = when (type) {
-        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth"
-        AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired headphones"
-        AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET -> "USB audio"
-        AudioDeviceInfo.TYPE_HDMI, AudioDeviceInfo.TYPE_HDMI_ARC -> "HDMI"
-        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Speaker"
-        AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Earpiece"
-        else -> "Unknown output"
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO ->
+            context.getString(R.string.gt_audio_bt)
+        AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_WIRED_HEADSET ->
+            context.getString(R.string.gt_audio_wired)
+        AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET ->
+            context.getString(R.string.gt_audio_usb)
+        AudioDeviceInfo.TYPE_HDMI, AudioDeviceInfo.TYPE_HDMI_ARC ->
+            context.getString(R.string.gt_audio_hdmi)
+        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> context.getString(R.string.gt_audio_speaker)
+        AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> context.getString(R.string.gt_audio_earpiece)
+        else -> context.getString(R.string.gt_audio_unknown)
     }
 
     private fun teardownEffects() {

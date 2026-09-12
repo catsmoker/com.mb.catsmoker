@@ -63,7 +63,7 @@ fun SpoofDeviceScreen(
 ) {
     ScreenScaffold(
         title = stringResource(R.string.dash_spoof_title),
-        subtitle = "Device identity and root masking suite.",
+        subtitle = stringResource(R.string.spoof_home_subtitle),
         onBack = onBack
     ) {
         Column(
@@ -73,31 +73,44 @@ fun SpoofDeviceScreen(
             SectionCard {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column {
-                        Text("Environment Status", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        Text(stringResource(R.string.spoof_home_status), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             StatusIndicator(active = uiState.isRooted)
-                            Text("Root Access", color = Color.White, fontSize = 14.sp)
+                            Text(stringResource(R.string.spoof_home_root), color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
                         }
                     }
-                    IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, null, tint = MaterialTheme.colorScheme.primary) }
+                    if (uiState.isRefreshing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, null, tint = MaterialTheme.colorScheme.primary) }
+                    }
+                }
+                if (uiState.isRefreshing) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Text("Management", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            Text(stringResource(R.string.spoof_home_management), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SpoofMenuCard(
-                    title = "Profiles",
-                    subtitle = "${uiState.profiles.size} Identities",
+                    title = stringResource(R.string.spoof_menu_profiles),
+                    subtitle = stringResource(R.string.spoof_menu_identities, uiState.profiles.size),
                     icon = Icons.Default.AccountBox,
                     modifier = Modifier.weight(1f),
                     onClick = { onNavigate("spoof_profiles") }
                 )
                 SpoofMenuCard(
-                    title = "Apps",
-                    subtitle = "${uiState.assignments.size} Hooked",
+                    title = stringResource(R.string.spoof_menu_apps),
+                    // Ladder packages are hooked too — they just get their identity per tier, so
+                    // counting only the plain assignments would under-report.
+                    subtitle = stringResource(R.string.spoof_menu_hooked, (uiState.assignments.keys + uiState.rateAssignments.keys).size),
                     icon = Icons.Default.Apps,
                     modifier = Modifier.weight(1f),
                     onClick = { onNavigate("spoof_apps") }
@@ -108,15 +121,15 @@ fun SpoofDeviceScreen(
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SpoofMenuCard(
-                    title = "Safe Mode",
-                    subtitle = "${uiState.safeModePackages.size} Apps",
+                    title = stringResource(R.string.spoof_menu_safe),
+                    subtitle = stringResource(R.string.spoof_menu_apps_count, uiState.safeModePackages.size),
                     icon = Icons.Default.Security,
                     modifier = Modifier.weight(1f),
                     onClick = { onNavigate("spoof_safe_mode") }
                 )
                 SpoofMenuCard(
-                    title = "Diagnostics",
-                    subtitle = "Verify Identity",
+                    title = stringResource(R.string.spoof_menu_diag),
+                    subtitle = stringResource(R.string.spoof_menu_verify),
                     icon = Icons.Default.Troubleshoot,
                     modifier = Modifier.weight(1f),
                     onClick = { onNavigate("spoof_diagnostics") }
@@ -125,25 +138,26 @@ fun SpoofDeviceScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Text("Advanced Tools", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            Text(stringResource(R.string.spoof_home_advanced), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             SectionCard {
                 QuickActionButton(
-                    title = "Magisk Module Generator",
-                    subtitle = "Flashable ZIP of your first profile. Carries the model identity only — kept minimal so a flash cannot boot-loop the device. Applies device-wide, so Safe Mode exclusions do not apply. After a reboot the module reports which properties actually landed.",
-                    iconContainerColor = Color.White.copy(alpha = 0.05f),
-                    iconContentColor = Color.White,
+                    title = stringResource(R.string.spoof_magisk_title),
+                    subtitle = if (uiState.isGeneratingMagisk) stringResource(R.string.spoof_magisk_building) else stringResource(R.string.spoof_magisk_desc),
+                    iconContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    iconContentColor = MaterialTheme.colorScheme.onSurface,
                     icon = { Icon(Icons.Default.FileDownload, null) },
                     onClick = onDownloadMagisk,
-                    isFullWidth = true
+                    isFullWidth = true,
+                    isLoading = uiState.isGeneratingMagisk
                 )
                 
                 if (uiState.isRooted) {
                     Spacer(modifier = Modifier.height(8.dp))
                     QuickActionButton(
-                        title = "Open Root Manager",
-                        subtitle = "Access Magisk/KernelSU/APatch.",
-                        iconContainerColor = Color.White.copy(alpha = 0.05f),
-                        iconContentColor = Color.White,
+                        title = stringResource(R.string.spoof_root_manager_title),
+                        subtitle = stringResource(R.string.spoof_root_manager_desc),
+                        iconContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        iconContentColor = MaterialTheme.colorScheme.onSurface,
                         icon = { Icon(Icons.Default.Settings, null) },
                         onClick = onOpenRootManager,
                         isFullWidth = true
@@ -168,8 +182,8 @@ fun SpoofMenuCard(
         Column(horizontalAlignment = Alignment.Start) {
             Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
             Spacer(modifier = Modifier.height(12.dp))
-            Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
-            Text(subtitle, fontSize = 12.sp, color = Color.Gray)
+            Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+            Text(subtitle, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

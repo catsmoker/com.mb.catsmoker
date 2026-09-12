@@ -112,6 +112,10 @@
     <string name="booster_status_done">Done: %1$d improved, %2$d were already fine, %3$d could not be done.</string>
     <string name="booster_status_cancelled">Stopped after %1$d apps.</string>
     <string name="booster_status_failed">Could not start: %1$s</string>
+    <!-- Scheduled sweep. It runs while the app is closed, so the notification is the only surface
+         a skipped run has — the reason is the engine's own refusal text, not a slogan. -->
+    <string name="booster_scheduled_title">Scheduled App Boost</string>
+    <string name="booster_scheduled_skipped">Did not run: %1$s</string>
     <!-- Dashboard -->
     <string name="dash_live_performance">REAL-TIME TELEMETRY</string>
     <string name="dash_fps_label"> FPS</string>

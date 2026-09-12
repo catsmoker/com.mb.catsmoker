@@ -9,6 +9,7 @@ import android.content.IntentFilter
 import android.os.Build
 import android.provider.Settings
 import android.util.Base64
+import android.view.Display
 import com.catsmoker.app.shared.data.model.LSPosedConfig
 import com.catsmoker.app.system.config.SpoofConfigProvider
 import de.robv.android.xposed.IXposedHookLoadPackage
@@ -94,6 +95,13 @@ class LSPosedModule : IXposedHookLoadPackage {
      * @return the parsed profile, or an empty map when the app should not be touched.
      */
     private fun readConfig(context: Context, packageName: String): Map<String, String> {
+        // Checked before any channel is consulted so it cannot be overridden by an assignment —
+        // the same hard floor as safe mode, but one the user cannot tick their way out of.
+        if (packageName in LSPosedConfig.NEVER_SPOOF_PACKAGES) {
+            XposedBridge.log("$TAG: $packageName is on the never-spoof list, leaving it alone")
+            return emptyMap()
+        }
+
         val text = queryProvider(context, packageName)
             ?: sectionFromGlobal(context.contentResolver, packageName)
             ?: legacyGlobal(context.contentResolver, packageName)
@@ -184,6 +192,8 @@ class LSPosedModule : IXposedHookLoadPackage {
         hookMediaDrm(classLoader)
         hookAdvertisingId(classLoader)
         hookAppSetId(classLoader)
+        hookGlStrings()
+        hookDisplayRefreshRate()
         GetPropInterceptor(lookup = ::lookupProp, properties = { props }).install()
     }
 
@@ -267,8 +277,92 @@ class LSPosedModule : IXposedHookLoadPackage {
         }
     }
 
-    private fun hookSettingsSecure(classLoader: ClassLoader) {
-        val settingsSecure = XposedHelpers.findClassIfExists("android.provider.Settings\$Secure", classLoader) ?: return
+    /**
+     * Spoofs `glGetString(GL_VENDOR)` / `glGetString(GL_RENDERER)` for the game's hardware checks.
+     *
+     * Unity and Unreal device-tier lookups on Android frequently read the GL strings from Java
+     * through `GLES20.glGetString` (or GLES10/30/31/32 — the same static method exists in each
+     * wrapper class), so a profile that changes `ro.product.model` but leaves the real GPU
+     * answering "Adreno (TM) 640" is a model/GPU pair no shipped device ever had. That
+     * disagreement is a stronger signal than either value alone, which is the same
+     * both-channels-or-neither test [GetPropInterceptor] exists for.
+     *
+     * The native route (`eglQueryString`/NDK `glGetString`) cannot be reached from here — the
+     * reference project hooks it with native PLT hooking under Zygisk, which LSPosed cannot
+     * do — so this covers the Java-queried half of the check, which is the half a Java-based
+     * tier lookup actually uses. Both keys are rendered together by `renderConfig` or not at
+     * all, so the spoof can never answer a vendor from the profile beside a renderer from the
+     * real silicon.
+     */
+    private fun hookGlStrings() {
+        val hook = object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                when (param.args.getOrNull(0) as? Int) {
+                    GL_VENDOR -> props[LSPosedConfig.KEY_GPU_VENDOR]?.let { param.result = it }
+                    GL_RENDERER -> props[LSPosedConfig.KEY_GPU_RENDERER]?.let { param.result = it }
+                }
+            }
+        }
+        // Each GLES wrapper class declares its own static glGetString, and a target may call any
+        // of them. Every install is individually guarded: GLES30+ do not exist below API 18 and
+        // a missing class is a miss, not an error.
+        for (glClass in listOf("android.opengl.GLES10", "android.opengl.GLES20",
+                "android.opengl.GLES30", "android.opengl.GLES31", "android.opengl.GLES32")) {
+            try {
+                XposedHelpers.findAndHookMethod(
+                    XposedHelpers.findClassIfExists(glClass, null) ?: continue,
+                    "glGetString", Int::class.javaPrimitiveType, hook
+                )
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    /**
+     * Spoofs `Display.getRefreshRate()` with the profile's rate, so a game whose frame-rate menu
+     * is gated on the *display's* reported rate lists the tiers the spoofed panel claims.
+     *
+     * Cross-checked against the reference project's `processHook.spoofRefreshRate` (read in full):
+     * it guards on the profile carrying a `refreshrate`, parses it as a float, and installs
+     * `XposedBridge.hookAllMethods(Display.class, "getRefreshRate", …)` whose `afterHookedMethod`
+     * forces the result — a `NumberFormatException` logged and swallowed. This port follows all
+     * of that, with the divergences the app's architecture dictates:
+     * * The reference hardcodes a compiled DEVICE_MAP of package → device profile; here the
+     *   mapping is the user's own assignments and frame-rate ladders, and the rate travels as a
+     *   rendered profile key ([LSPosedConfig.KEY_SCREEN_REFRESH_RATE]) like every other value.
+     * * The reference's per-device `refreshrate` strings (165/120 Hz) are its own model-table
+     *   data — reference model tables are not preset candidates, so our presets leave the field
+     *   blank and the hook stays out of their rendered profiles entirely.
+     * * The reference's device-spoofing half (`spoofDeviceProperties`, Build-field reflection) is
+     *   not re-ported: [applyBuildFields] already owns that with original-capture restore.
+     * * HEAD of the reference replaced all of this with a remote-JSON fetch (per-device profiles
+     *   downloaded at runtime, its README's "no extra configuration"); that design is not ported —
+     *   our profiles are local, user-owned, and offline by construction.
+     *
+     * Why an int in the profile when the hook forces a float: Android reports nominal rates as
+     * floats (`119.999985`), but every game gate compares against user-facing tiers (60/90/120),
+     * so the editor collects whole Hz and the spoof answers the value as given — no rounding of
+     * the panel's own jitter is inherited by the spoof.
+     *
+     * `Display` resolves via `Display::class.java` rather than a classloader lookup because it is
+     * a public framework class present in every target process; a hookAllMethods miss (no such
+     * method — not possible today, but not our promise either) is caught and treated as a miss,
+     * not an error, like every other hook here.
+     */
+    private fun hookDisplayRefreshRate() {
+        val hook = object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                val rate = props[LSPosedConfig.KEY_SCREEN_REFRESH_RATE]?.toFloatOrNull() ?: return
+                if (rate > 0f) param.result = rate
+            }
+        }
+        try {
+            XposedBridge.hookAllMethods(Display::class.java, "getRefreshRate", hook)
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun hookSettingsSecure(classLoader: ClassLoader) {        val settingsSecure = XposedHelpers.findClassIfExists("android.provider.Settings\$Secure", classLoader) ?: return
         val hook = object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 if (param.args.getOrNull(1) as? String != Settings.Secure.ANDROID_ID) return
@@ -513,6 +607,10 @@ class LSPosedModule : IXposedHookLoadPackage {
 
         /** `AppSetIdInfo.SCOPE_APP`, inlined because the GMS class is not on our classpath. */
         const val APP_SET_SCOPE_APP = 1
+
+        /** GL enums, inlined so the hook file needs no android.opengl import. */
+        const val GL_VENDOR = 0x1F00
+        const val GL_RENDERER = 0x1F01
 
         val VERSION_CLASS: Class<*> = Build.VERSION::class.java
 

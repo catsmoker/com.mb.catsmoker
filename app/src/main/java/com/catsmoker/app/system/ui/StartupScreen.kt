@@ -37,7 +37,8 @@ fun StartupScreen(onFinished: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black),
+            // Theme background, not fixed black: the red logo and dots read on both.
+            .background(MaterialTheme.colorScheme.background),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -65,7 +66,7 @@ fun StartupScreen(onFinished: () -> Unit) {
             Text(
                 text = "v${BuildConfig.VERSION_NAME}",
                 fontFamily = NdotFontFamily,
-                color = Color.White.copy(alpha = 0.7f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 14.sp
             )
         }

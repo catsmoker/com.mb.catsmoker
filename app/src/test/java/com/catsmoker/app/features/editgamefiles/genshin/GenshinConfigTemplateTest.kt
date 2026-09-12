@@ -1,4 +1,4 @@
-package com.catsmoker.app.features.editgamefiles
+package com.catsmoker.app.features.editgamefiles.genshin
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

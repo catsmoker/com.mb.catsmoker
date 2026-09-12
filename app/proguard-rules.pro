@@ -41,3 +41,10 @@
 -keep class com.catsmoker.app.shared.data.model.LSPosedConfig { *; }
 
 -dontwarn de.robv.android.xposed.**
+
+# ShellRunner reflects Shizuku's private newProcess(String[], String[], String) — the one-shot
+# remote-shell channel (BattleGrounds_GFX's mechanism) that works when the user-service helper
+# will not start. R8 must not rename/remove the method on the library class.
+-keepclassmembers class rikka.shizuku.Shizuku {
+    private static java.lang.Process newProcess(java.lang.String[], java.lang.String[], java.lang.String);
+}

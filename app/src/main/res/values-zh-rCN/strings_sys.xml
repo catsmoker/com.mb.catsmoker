@@ -1,0 +1,47 @@
+<resources>
+    <!-- Settings screen + update flow + support dialog. Language endonyms stay native in every locale. -->
+    <string name="sys_settings_title">设置</string>
+    <string name="sys_settings_subtitle">应用配置和偏好设置。</string>
+    <string name="sys_section_general">通用</string>
+    <string name="sys_ads_title">启用广告</string>
+    <string name="sys_section_updates">更新</string>
+    <string name="sys_updating">正在下载更新…</string>
+    <string name="sys_check_updates">检查更新</string>
+    <string name="sys_auto_check">自动检查更新</string>
+    <string name="sys_update_available">有可用更新：%1$s</string>
+    <string name="sys_update_prompt">有新版本可用。现在下载并安装吗？</string>
+    <string name="sys_download">下载</string>
+    <string name="sys_later">稍后</string>
+    <string name="sys_section_management">管理</string>
+    <string name="sys_permissions_title">应用权限</string>
+    <string name="sys_permissions_subtitle">管理已授予的权限。</string>
+    <string name="sys_logs_title">系统日志</string>
+    <string name="sys_logs_subtitle">查看应用和系统诊断信息。</string>
+    <string name="sys_section_appearance">外观</string>
+    <string name="sys_theme_title">主题</string>
+    <string name="sys_theme_subtitle">深色或浅色界面。</string>
+    <string name="sys_theme_system">跟随系统</string>
+    <string name="sys_theme_dark">深色</string>
+    <string name="sys_theme_light">浅色</string>
+    <string name="sys_language_title">语言</string>
+    <string name="sys_language_subtitle">应用语言，立即生效。</string>
+    <string name="sys_lang_system">跟随系统</string>
+    <string name="sys_lang_english">English</string>
+    <string name="sys_lang_arabic">العربية</string>
+    <string name="sys_lang_spanish">Español</string>
+    <string name="sys_lang_chinese">中文 (简体)</string>
+    <string name="sys_checking_updates">正在检查更新…</string>
+    <string name="sys_no_releases">在 GitHub 上未找到版本</string>
+    <string name="sys_up_to_date">应用已是最新版本 (v%1$s)</string>
+    <string name="sys_no_suitable_release">未找到合适的版本</string>
+    <string name="sys_update_check_failed">检查更新失败：%1$s</string>
+    <string name="sys_download_failed">下载失败：%1$s</string>
+    <string name="sys_support_title">支持开发者</string>
+    <string name="sys_support_text">请在 GitHub 上为项目点星，并通过 PayPal 捐赠以支持开发者。</string>
+    <string name="sys_support_star">点星</string>
+    <string name="sys_support_donate">捐赠</string>
+    <!-- First-run onboarding step one. -->
+    <string name="sys_first_run_title">欢迎使用 CatSmoker</string>
+    <string name="sys_first_run_subtitle">选择应用的外观和语言，稍后可在设置中更改。</string>
+    <string name="sys_continue">继续</string>
+</resources>

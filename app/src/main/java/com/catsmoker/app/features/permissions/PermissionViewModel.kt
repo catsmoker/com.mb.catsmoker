@@ -11,13 +11,17 @@ import android.provider.Settings
 import androidx.core.content.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.catsmoker.app.system.config.AppearanceStore
 import com.catsmoker.app.system.shell.ShellRunner
 import com.topjohnwu.superuser.Shell
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -32,7 +36,13 @@ class PermissionViewModel @Inject constructor(
 ) : ViewModel() {
 
     data class UiState(
+        /** First-run step one: theme + language, one full screen with no scrolling. */
+        val isAppearanceStep: Boolean = true,
+        /** First-run step two: the terms checkbox gates its own Continue. */
         val isAgreementStep: Boolean = true,
+        val themeMode: AppearanceStore.ThemeMode = AppearanceStore.ThemeMode.SYSTEM,
+        /** Staged language tag — saved only on Continue, since it needs a recreate. */
+        val languageTag: String = AppearanceStore.LANGUAGE_SYSTEM,
         val isAgreed: Boolean = false,
         val rootGranted: Boolean = false,
         val notifGranted: Boolean = false,
@@ -45,10 +55,32 @@ class PermissionViewModel @Inject constructor(
         val bluetoothGranted: Boolean = false,
     )
 
+    /** One-shot UI actions the screen itself must perform (activity recreate for locale). */
+    sealed interface UiEvent {
+        data object RecreateActivity : UiEvent
+    }
+
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
+    private val _events = MutableSharedFlow<UiEvent>(extraBufferCapacity = 1)
+    val events: SharedFlow<UiEvent> = _events.asSharedFlow()
+
     init {
+        // Reopened from Settings after onboarding (`is_first_run` — what MainActivity gates
+        // the start destination on — already false): skip both gates and land on the plain
+        // permission list. The flags are committed before navigation and the ViewModel
+        // survives the language recreate, so this holds.
+        if (!context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+                .getBoolean("is_first_run", true)) {
+            _uiState.update { it.copy(isAppearanceStep = false, isAgreementStep = false) }
+        }
+        _uiState.update {
+            it.copy(
+                themeMode = AppearanceStore.themeModeSync(context),
+                languageTag = AppearanceStore.languageTag(context)
+            )
+        }
         viewModelScope.launch {
             shellRunner.shizukuHasPermission.collect { granted ->
                 _uiState.update { it.copy(shizukuGranted = granted) }
@@ -60,19 +92,52 @@ class PermissionViewModel @Inject constructor(
         _uiState.update { it.copy(isAgreed = agreed) }
     }
 
-    fun onContinue(): Boolean {
-        val current = _uiState.value
-        if (current.isAgreementStep) {
-            if (!current.isAgreed) return false
-            _uiState.update { it.copy(isAgreementStep = false) }
-            return true
+    /** Theme previews live — the flow recomposes the whole app around the onboarding. */
+    fun onThemeModeChanged(mode: AppearanceStore.ThemeMode) {
+        AppearanceStore.setThemeMode(context, mode)
+        _uiState.update { it.copy(themeMode = mode) }
+    }
+
+    /** Staged only: the locale needs an activity recreate, which the step's Continue triggers. */
+    fun onLanguageChanged(tag: String) {
+        _uiState.update { it.copy(languageTag = tag) }
+    }
+
+    /**
+     * Step one's Continue: commits theme + language, marks the gate answered and advances.
+     * The language flag is committed (and the recreate requested) before advancing, so a
+     * mid-restart process death cannot re-show this step or lose the picked language.
+     */
+    fun onAppearanceContinue() {
+        val state = _uiState.value
+        AppearanceStore.setThemeMode(context, state.themeMode)
+        val previous = AppearanceStore.languageTag(context)
+        AppearanceStore.setLanguage(context, state.languageTag)
+        AppearanceStore.setChosen(context)
+        _uiState.update { it.copy(isAppearanceStep = false) }
+        if (state.languageTag != previous) {
+            _events.tryEmit(UiEvent.RecreateActivity)
         }
+    }
+
+    /** Step two's Continue: advances only when the terms checkbox is checked. */
+    fun onAgreementContinue(): Boolean {
+        val current = _uiState.value
+        if (!current.isAgreed) return false
+        _uiState.update { it.copy(isAgreementStep = false) }
         return true
     }
 
-    fun completeOnboarding() {
-        context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE).edit {
-            putBoolean("is_first_run", false)
+    /**
+     * Step three's DONE. Commits the onboarding flag before navigating so a first run
+     * must not re-enter onboarding, and a Settings revisit lands on the permission list.
+     */
+    fun onDone(onDone: () -> Unit) {
+        viewModelScope.launch {
+            context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE).edit {
+                putBoolean("is_first_run", false)
+            }
+            withContext(Dispatchers.Main) { onDone() }
         }
     }
 

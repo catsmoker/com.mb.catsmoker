@@ -3,7 +3,7 @@ agp = "9.4.0"
 api = "82"
 core = "1.19.0"
 coreSplashscreen = "1.2.0"
-coreVersion = "5.2.2"
+coreVersion = "6.0.0"
 documentfile = "1.1.0"
 junit = "4.13.2"
 material = "1.14.0"
@@ -12,14 +12,15 @@ startioSdk = "5.3.2"
 provider = "13.1.5"
 coreKtx = "1.19.0"
 kotlin = "2.4.10"
-composeBom = "2026.08.00"
-navigationCompose = "2.9.8"
+composeBom = "2026.09.00"
+navigationCompose = "2.10.1"
 lifecycle = "2.11.0"
 ksp = "2.3.10"
 androidxHilt = "1.4.0"
 hilt = "2.60.1"
 kotlinxCoroutines = "1.11.0"
 gson = "2.14.0"
+work = "2.11.2"
 
 [libraries]
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
@@ -28,6 +29,8 @@ core = { module = "androidx.core:core", version.ref = "core" }
 core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "coreSplashscreen" }
 documentfile = { module = "androidx.documentfile:documentfile", version.ref = "documentfile" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+# Real org.json for JVM unit tests only — android.jar's copy is a stub that throws.
+json-test = { group = "org.json", name = "json", version = "20260814" }
 libsu-core = { module = "com.github.topjohnwu.libsu:core", version.ref = "coreVersion" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 activity = { group = "androidx.activity", name = "activity", version.ref = "activity" }
@@ -51,7 +54,10 @@ lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtim
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
 hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
 androidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "androidxHilt" }
+androidx-hilt-work = { group = "androidx.hilt", name = "hilt-work", version.ref = "androidxHilt" }
+androidx-hilt-compiler = { group = "androidx.hilt", name = "hilt-compiler", version.ref = "androidxHilt" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

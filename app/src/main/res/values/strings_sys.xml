@@ -1,0 +1,47 @@
+<resources>
+    <!-- Settings screen + update flow + support dialog. Language endonyms stay native in every locale. -->
+    <string name="sys_settings_title">Settings</string>
+    <string name="sys_settings_subtitle">App configuration and preferences.</string>
+    <string name="sys_section_general">General</string>
+    <string name="sys_ads_title">Enable Ads</string>
+    <string name="sys_section_updates">Updates</string>
+    <string name="sys_updating">Downloading update…</string>
+    <string name="sys_check_updates">Check for Updates</string>
+    <string name="sys_auto_check">Auto Check Updates</string>
+    <string name="sys_update_available">Update Available: %1$s</string>
+    <string name="sys_update_prompt">A new version is available. Download and install now?</string>
+    <string name="sys_download">DOWNLOAD</string>
+    <string name="sys_later">LATER</string>
+    <string name="sys_section_management">Management</string>
+    <string name="sys_permissions_title">App Permissions</string>
+    <string name="sys_permissions_subtitle">Manage granted permissions.</string>
+    <string name="sys_logs_title">System Logs</string>
+    <string name="sys_logs_subtitle">View app and system diagnostics.</string>
+    <string name="sys_section_appearance">Appearance</string>
+    <string name="sys_theme_title">Theme</string>
+    <string name="sys_theme_subtitle">Dark or light screens.</string>
+    <string name="sys_theme_system">System default</string>
+    <string name="sys_theme_dark">Dark</string>
+    <string name="sys_theme_light">Light</string>
+    <string name="sys_language_title">Language</string>
+    <string name="sys_language_subtitle">App language. Takes effect right away.</string>
+    <string name="sys_lang_system">System default</string>
+    <string name="sys_lang_english">English</string>
+    <string name="sys_lang_arabic">العربية</string>
+    <string name="sys_lang_spanish">Español</string>
+    <string name="sys_lang_chinese">中文 (简体)</string>
+    <string name="sys_checking_updates">Checking for updates…</string>
+    <string name="sys_no_releases">No releases found on GitHub</string>
+    <string name="sys_up_to_date">App is up to date (v%1$s)</string>
+    <string name="sys_no_suitable_release">No suitable release found</string>
+    <string name="sys_update_check_failed">Update check failed: %1$s</string>
+    <string name="sys_download_failed">Download failed: %1$s</string>
+    <string name="sys_support_title">Support the Developer</string>
+    <string name="sys_support_text">Please star the project on GitHub and donate to help the dev on PayPal.</string>
+    <string name="sys_support_star">Star</string>
+    <string name="sys_support_donate">Donate</string>
+    <!-- First-run onboarding step one. -->
+    <string name="sys_first_run_title">Welcome to CatSmoker</string>
+    <string name="sys_first_run_subtitle">Choose how the app looks and which language it speaks. You can change this later in Settings.</string>
+    <string name="sys_continue">CONTINUE</string>
+</resources>

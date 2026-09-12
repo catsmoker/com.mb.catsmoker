@@ -15,7 +15,10 @@ android {
         applicationId = "com.catsmoker.app"
         minSdk = 27
         targetSdk = 36
-        versionCode = 6
+        // versionCode 7: IFileService gained readFile/writeFile — the bump is what forces
+        // Shizuku to restart the daemonized helper whose AIDL no longer matches (see the
+        // ShellRunner KDoc). Shipped helpers keep serving the old AIDL until this moves.
+        versionCode = 7
         versionName = "2.0.0"
 
         vectorDrawables {
@@ -110,6 +113,12 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
+    // @HiltWorker needs hilt-work's factory plus its own annotation processor.
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
+
+    // --- Background scheduling (the recurring dexopt sweep) ---
+    implementation(libs.work.runtime.ktx)
 
     // --- Coroutines ---
     implementation(libs.kotlinx.coroutines.android)
@@ -130,6 +139,7 @@ dependencies {
 
     // --- Testing ---
     testImplementation(libs.junit)
+    testImplementation(libs.json.test)
 }
 
 ksp {

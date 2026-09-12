@@ -95,7 +95,7 @@ class AutoForceStopService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIF_ID, buildNotification("Starting…"))
+        startForeground(NOTIF_ID, buildNotification(getString(R.string.gt_svc_starting)))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -124,11 +124,11 @@ class AutoForceStopService : Service() {
             // Re-checked every cycle rather than once at startup, so the service starts working the
             // moment the user grants what is missing — no restart, no toggling the switch again.
             if (!hasUsageAccess()) {
-                postStatus("Needs usage access — tap to grant, nothing is being closed")
+                postStatus(getString(R.string.gt_svc_afs_no_usage))
                 continue
             }
             if (!shellRunner.hasPrivilege()) {
-                postStatus("Needs root or Shizuku — Android refuses to close other apps, nothing is closed")
+                postStatus(getString(R.string.gt_svc_afs_no_priv))
                 continue
             }
 
@@ -148,12 +148,13 @@ class AutoForceStopService : Service() {
             }
 
             val keepNote = if (kept.isEmpty()) {
-                "Closing every app you leave"
+                getString(R.string.gt_svc_afs_close_all)
             } else {
-                "Keeping ${kept.size} app(s) open"
+                getString(R.string.gt_svc_afs_keep_some, kept.size)
             }
             postStatus(
-                if (stoppedCount == 0) "$keepNote — none closed yet" else "$keepNote — $stoppedCount closed"
+                if (stoppedCount == 0) getString(R.string.gt_svc_afs_none_yet, keepNote)
+                else getString(R.string.gt_svc_afs_closed, keepNote, stoppedCount)
             )
         }
     }
@@ -259,7 +260,7 @@ class AutoForceStopService : Service() {
 
     private fun createNotificationChannel() {
         val nm = getSystemService(NotificationManager::class.java)
-        val channel = NotificationChannel(CHANNEL_ID, "Auto Force Stop", NotificationManager.IMPORTANCE_LOW)
+        val channel = NotificationChannel(CHANNEL_ID, getString(R.string.gt_svc_afs_channel), NotificationManager.IMPORTANCE_LOW)
         nm.createNotificationChannel(channel)
     }
 
@@ -278,7 +279,7 @@ class AutoForceStopService : Service() {
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Auto Force Stop")
+            .setContentTitle(getString(R.string.gt_svc_afs_title))
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setSmallIcon(R.mipmap.ic_launcher)

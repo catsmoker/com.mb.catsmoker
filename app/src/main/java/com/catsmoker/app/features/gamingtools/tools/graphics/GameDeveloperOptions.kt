@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
+import com.catsmoker.app.R
 import com.catsmoker.app.features.gamingtools.engine.DisplayRefreshRateProvider
 import com.catsmoker.app.system.shell.ShellRunner
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -138,15 +139,14 @@ class GameDeveloperOptions @Inject constructor(
         // The rate the panel is on right now, which needs no privilege and is worth showing whether or
         // not SurfaceFlinger's own overlay can be turned on.
         val liveNote = refreshRates.getCurrentRefreshRate()
-            ?.let { "Display is running at ${formatHz(it)} right now" }
-            ?: "This device did not report its current refresh rate"
+            ?.let { context.getString(R.string.gt_gdo_live_at, formatHz(it)) }
+            ?: context.getString(R.string.gt_gdo_live_unknown)
 
         if (!shellRunner.hasPrivilege()) {
             return@withContext ToggleState(
                 enabled = false,
                 available = false,
-                unavailableReason = "This app can't switch it on by itself. Tap the button to turn it " +
-                    "on in Android's own settings.",
+                unavailableReason = context.getString(R.string.gt_gdo_no_priv),
                 detail = liveNote,
                 openDeveloperOptions = true
             )
@@ -157,7 +157,7 @@ class GameDeveloperOptions @Inject constructor(
             is OverlayProbe.Answered -> ToggleState(
                 enabled = probe.enabled,
                 available = true,
-                detail = "$liveNote · Android confirmed this is the real state"
+                detail = context.getString(R.string.gt_gdo_confirmed, liveNote)
             )
 
             // Turned down. The state is genuinely unknown — not "off", which would be a reading the
@@ -167,7 +167,9 @@ class GameDeveloperOptions @Inject constructor(
             is OverlayProbe.Refused -> ToggleState(
                 enabled = null,
                 available = false,
-                unavailableReason = "${probe.reason} ${refusalAdvice()}",
+                unavailableReason = context.getString(
+                    R.string.gt_gdo_refused_detail, probe.reason, refusalAdvice()
+                ),
                 detail = liveNote,
                 openDeveloperOptions = true
             )
@@ -179,23 +181,22 @@ class GameDeveloperOptions @Inject constructor(
                 val buildDefault = if (recorded == null) buildDefaultOverlay() else null
                 val refusal = staleProofRefusal()
                 val source = when {
-                    refusal != null -> "your phone turned the last attempt down"
+                    refusal != null -> context.getString(R.string.gt_gdo_src_refused)
                     recorded != null ->
-                        "shown as you last set it — Android ${Build.VERSION.RELEASE} cannot be asked " +
-                            "for it"
+                        context.getString(R.string.gt_gdo_src_recorded, Build.VERSION.RELEASE)
                     buildDefault != null ->
-                        "shown from the way your phone starts up — Android ${Build.VERSION.RELEASE} " +
-                            "cannot be asked for it"
+                        context.getString(R.string.gt_gdo_src_boot, Build.VERSION.RELEASE)
                     else ->
-                        "shown off until you use the switch — it always starts off after a restart, " +
-                            "and Android ${Build.VERSION.RELEASE} cannot be asked for it"
+                        context.getString(R.string.gt_gdo_src_fresh, Build.VERSION.RELEASE)
                 }
 
                 ToggleState(
                     enabled = if (refusal != null) null else recorded ?: buildDefault ?: false,
                     available = refusal == null,
-                    unavailableReason = refusal?.let { "$it ${refusalAdvice()}" },
-                    detail = "$liveNote · $source",
+                    unavailableReason = refusal?.let {
+                        context.getString(R.string.gt_gdo_refused_detail, it, refusalAdvice())
+                    },
+                    detail = context.getString(R.string.gt_gdo_detail_join, liveNote, source),
                     openDeveloperOptions = refusal != null
                 )
             }
@@ -213,10 +214,9 @@ class GameDeveloperOptions @Inject constructor(
      */
     private fun refusalAdvice(): String =
         if (shellRunner.isRootAvailable()) {
-            "Your phone's own settings screen can still do it."
+            context.getString(R.string.gt_gdo_advice_root)
         } else {
-            "Shizuku runs commands as \"shell\", which newer Android versions will not let near this " +
-                "part of the system. Root, or Android's own settings screen, can still do it."
+            context.getString(R.string.gt_gdo_advice_shell)
         }
 
     /**
@@ -324,9 +324,8 @@ class GameDeveloperOptions @Inject constructor(
         if (peak <= DEFAULT_REFRESH_RATE) {
             return ToggleState(
                 available = false,
-                unavailableReason = "Your screen only has one speed, so there is nothing faster to " +
-                    "switch to.",
-                detail = "Your screen runs at ${formatHz(peak)}"
+                unavailableReason = context.getString(R.string.gt_gdo_single_speed),
+                detail = context.getString(R.string.gt_gdo_runs_at, formatHz(peak))
             )
         }
         // An unset key means "no minimum": Settings.System.getFloat(cr, key, 0f) — which is how the
@@ -341,13 +340,12 @@ class GameDeveloperOptions @Inject constructor(
             unavailableReason = if (canWriteSystemSettings()) {
                 null
             } else {
-                "Needs root or Shizuku, or permission to change system settings."
+                context.getString(R.string.gt_gdo_need_sys)
             },
-            detail = buildString {
-                append("Your screen can go up to ${formatHz(peak)}")
-                if (current > 0f && current < peak - HZ_TOLERANCE) {
-                    append(" · it is being held at ${formatHz(current)} or above")
-                }
+            detail = if (current > 0f && current < peak - HZ_TOLERANCE) {
+                context.getString(R.string.gt_gdo_peak_full, formatHz(peak), formatHz(current))
+            } else {
+                context.getString(R.string.gt_gdo_peak_upto, formatHz(peak))
             }
         )
     }
@@ -400,8 +398,7 @@ class GameDeveloperOptions @Inject constructor(
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
             return@withContext ToggleState(
                 available = false,
-                unavailableReason = "Your phone is too old for this. It needs Android 15 and yours " +
-                    "is Android ${Build.VERSION.RELEASE}."
+                unavailableReason = context.getString(R.string.gt_gdo_old15, Build.VERSION.RELEASE)
             )
         }
         val cap = getProp(PROP_GAME_FRAME_RATE_OVERRIDE)?.toIntOrNull()
@@ -415,12 +412,12 @@ class GameDeveloperOptions @Inject constructor(
             unavailableReason = if (shellRunner.hasPrivilege()) {
                 null
             } else {
-                "Needs root or Shizuku. Android does not let a normal app change this."
+                context.getString(R.string.gt_needs_root_shizuku_change)
             },
             detail = if (cap != null) {
-                "Games are limited to $cap frames a second on your phone"
+                context.getString(R.string.gt_gdo_cap, cap)
             } else {
-                "Your phone does not say what its game limit is"
+                context.getString(R.string.gt_gdo_cap_unknown)
             }
         )
     }

@@ -38,10 +38,12 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.catsmoker.app.R
 import com.catsmoker.app.features.gamingtools.engine.AnimationScaleKind
 import com.catsmoker.app.features.gamingtools.engine.BoosterOutcome
+import com.catsmoker.app.features.gamingtools.engine.BoosterRun
 import com.catsmoker.app.features.gamingtools.engine.BoosterState
 import com.catsmoker.app.features.gamingtools.engine.GamingModeReport
 import com.catsmoker.app.features.gamingtools.engine.GamingModeState
 import com.catsmoker.app.features.gamingtools.tools.cleaner.CleaningFeature
+import com.catsmoker.app.features.gamingtools.tools.booster.DexoptScheduleStore
 import com.catsmoker.app.features.gamingtools.tools.dns.DnsFeature
 import com.catsmoker.app.features.gamingtools.tools.firewall.BackgroundDataRestrictor
 import com.catsmoker.app.features.gamingtools.tools.firewall.VpnFirewall
@@ -65,6 +67,7 @@ fun GamingToolsRoute(onNavigate: (String) -> Unit, onBack: () -> Unit) {
     val isFixedPerformanceMode by viewModel.isFixedPerformanceMode.collectAsState()
     val boosterLog by viewModel.boosterLog.collectAsState()
     val boosterState by viewModel.boosterState.collectAsState()
+    val boosterHistory by viewModel.boosterHistory.collectAsState()
     val animationScales by viewModel.animationScales.collectAsState()
     val alwaysFinishActivities by viewModel.alwaysFinishActivities.collectAsState()
     val backgroundProcessLimit by viewModel.backgroundProcessLimit.collectAsState()
@@ -125,6 +128,7 @@ fun GamingToolsRoute(onNavigate: (String) -> Unit, onBack: () -> Unit) {
         isFixedPerformanceMode = isFixedPerformanceMode,
         boosterLog = boosterLog,
         boosterState = boosterState,
+        boosterHistory = boosterHistory,
         animationScales = animationScales,
         alwaysFinishActivities = alwaysFinishActivities,
         backgroundProcessLimit = backgroundProcessLimit,
@@ -155,6 +159,10 @@ fun GamingToolsRoute(onNavigate: (String) -> Unit, onBack: () -> Unit) {
         },
         onPerformMaintenance = viewModel::onPerformMaintenance,
         onScanJunk = viewModel::scanForJunk,
+        onAddCleanerKeepEntry = viewModel::addCleanerKeepEntry,
+        onRemoveCleanerKeepEntry = viewModel::removeCleanerKeepEntry,
+        onAddCleanerCleanPattern = viewModel::addCleanerCleanPattern,
+        onRemoveCleanerCleanPattern = viewModel::removeCleanerCleanPattern,
         onGrantStorageAccess = {
             val intent = viewModel.allFilesAccessIntent()
             if (intent == null) {
@@ -176,6 +184,8 @@ fun GamingToolsRoute(onNavigate: (String) -> Unit, onBack: () -> Unit) {
         onBoostRam = viewModel::boostRam,
         onRunBooster = viewModel::runBooster,
         onStopBooster = viewModel::stopBooster,
+        onSetDexoptSchedule = viewModel::setDexoptSchedule,
+        onSetDexoptInterval = viewModel::setDexoptInterval,
         onToggleFixedPerformance = viewModel::toggleFixedPerformance,
         onBoostChange = viewModel::onBoostChange,
         onSetAnimationScale = viewModel::setAnimationScale,
@@ -194,7 +204,7 @@ fun GamingToolsRoute(onNavigate: (String) -> Unit, onBack: () -> Unit) {
                 try {
                     developerOptionsLauncher.launch(Intent(Settings.ACTION_SETTINGS))
                 } catch (_: Exception) {
-                    Toast.makeText(context, "This device has no Developer options screen", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, context.getString(R.string.gt_dialog_no_dev_options), Toast.LENGTH_LONG).show()
                 }
             }
         },
@@ -235,10 +245,10 @@ fun GamingToolsRoute(onNavigate: (String) -> Unit, onBack: () -> Unit) {
     if (uiState.showAggressiveCleanWarning) {
         AlertDialog(
             onDismissRequest = viewModel::dismissAggressiveCleanWarning,
-            title = { Text("Aggressive Cleaning Warning") },
-            text = { Text("You have selected aggressive cleaning categories. Proceed?") },
-            confirmButton = { TextButton(onClick = viewModel::confirmAggressiveClean) { Text("CLEAN") } },
-            dismissButton = { TextButton(onClick = viewModel::dismissAggressiveCleanWarning) { Text("CANCEL") } }
+            title = { Text(stringResource(R.string.gt_dialog_aggressive_title)) },
+            text = { Text(stringResource(R.string.gt_dialog_aggressive_text)) },
+            confirmButton = { TextButton(onClick = viewModel::confirmAggressiveClean) { Text(stringResource(R.string.gt_dialog_clean)) } },
+            dismissButton = { TextButton(onClick = viewModel::dismissAggressiveCleanWarning) { Text(stringResource(R.string.gt_dialog_cancel)) } }
         )
     }
     
@@ -248,10 +258,10 @@ fun GamingToolsRoute(onNavigate: (String) -> Unit, onBack: () -> Unit) {
     uiState.resWarning?.let { warning ->
         AlertDialog(
             onDismissRequest = viewModel::dismissResWarning,
-            title = { Text("Check this resolution") },
+            title = { Text(stringResource(R.string.gt_dialog_res_title)) },
             text = { Text(warning) },
-            confirmButton = { TextButton(onClick = viewModel::confirmResWarning) { Text("APPLY") } },
-            dismissButton = { TextButton(onClick = viewModel::dismissResWarning) { Text("CANCEL") } }
+            confirmButton = { TextButton(onClick = viewModel::confirmResWarning) { Text(stringResource(R.string.gt_dialog_apply)) } },
+            dismissButton = { TextButton(onClick = viewModel::dismissResWarning) { Text(stringResource(R.string.gt_dialog_cancel)) } }
         )
     }
 }
@@ -264,6 +274,7 @@ fun GamingToolsScreen(
     isFixedPerformanceMode: Boolean,
     boosterLog: List<String>,
     boosterState: BoosterState,
+    boosterHistory: List<BoosterRun>,
     animationScales: Triple<Float, Float, Float>,
     alwaysFinishActivities: Boolean,
     backgroundProcessLimit: Boolean,
@@ -278,12 +289,20 @@ fun GamingToolsScreen(
     onToggleDnd: (Boolean) -> Unit,
     onPerformMaintenance: (List<CleaningFeature.Category>) -> Unit,
     onScanJunk: () -> Unit,
+    onAddCleanerKeepEntry: (String) -> Unit,
+    onRemoveCleanerKeepEntry: (String) -> Unit,
+    onAddCleanerCleanPattern: (String) -> Unit,
+    onRemoveCleanerCleanPattern: (String) -> Unit,
     onGrantStorageAccess: () -> Unit,
     onActivateGamingMode: () -> Unit,
     onDeactivateGamingMode: () -> Unit,
     onBoostRam: () -> Unit,
     onRunBooster: (String, Boolean) -> Unit,
     onStopBooster: () -> Unit,
+    /** Enrolls or removes the recurring dexopt sweep in WorkManager. */
+    onSetDexoptSchedule: (Boolean) -> Unit,
+    /** Retunes the interval of the recurring sweep (hours, one of DexoptScheduleStore.INTERVAL_CHOICES). */
+    onSetDexoptInterval: (Int) -> Unit,
     onBoostChange: (Int) -> Unit,
     onSetAnimationScale: (AnimationScaleKind, Float) -> Unit,
     onToggleAlwaysFinish: (Boolean) -> Unit,
@@ -337,7 +356,7 @@ fun GamingToolsScreen(
         ) {
             // Library
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.gt_section_your_library), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                Text(stringResource(R.string.gt_section_your_library), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 IconButton(onClick = onAddGameClicked, modifier = Modifier.size(24.dp)) {
                     Icon(Icons.Default.Add, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                 }
@@ -345,7 +364,7 @@ fun GamingToolsScreen(
             Spacer(modifier = Modifier.height(12.dp))
             if (uiState.games.isEmpty()) {
                 Box(modifier = Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
-                    Text(stringResource(R.string.gt_no_games_detected), color = Color.DarkGray, fontSize = 13.sp)
+                    Text(stringResource(R.string.gt_no_games_detected), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                 }
             } else {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -376,27 +395,37 @@ fun GamingToolsScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             // Tools
-            Text(stringResource(R.string.gt_section_performance_boost), style = MaterialTheme.typography.labelSmall, color = Color.Gray, modifier = Modifier.padding(bottom = 12.dp))
+            Text(stringResource(R.string.gt_section_performance_boost), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 12.dp))
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ExpandableToolCard(title = "Louder Sound", subtitle = "Turn the volume up past the limit.", icon = Icons.AutoMirrored.Filled.VolumeUp) {
+                ExpandableToolCard(title = stringResource(R.string.gt_tool_sound_title), subtitle = stringResource(R.string.gt_tool_sound_sub), icon = Icons.AutoMirrored.Filled.VolumeUp) {
                     BoostContent(uiState.boostLevel, uiState.audioOutput, onBoostChange)
                 }
                 ExpandableToolCard(
-                    title = "App Booster",
-                    subtitle = "Get apps ready so games stutter less.",
+                    title = stringResource(R.string.gt_tool_booster_title),
+                    subtitle = stringResource(R.string.gt_tool_booster_sub),
                     icon = Icons.Default.RocketLaunch,
                     enabled = hasPrivilege,
-                    requirementNote = "Needs root or Shizuku. Android does not let a normal app do this. " +
-                        "Shizuku is a free helper app that lends this app that power without root."
+                    requirementNote = stringResource(R.string.gt_tool_booster_need)
                 ) {
-                    AppBoosterContent(boosterState, boosterLog, onRunBooster, onStopBooster)
+                    AppBoosterContent(
+                        state = boosterState,
+                        log = boosterLog,
+                        history = boosterHistory,
+                        scheduleEnabled = uiState.dexoptScheduleEnabled,
+                        scheduleIntervalHours = uiState.dexoptIntervalHours,
+                        scheduleNextRunAt = uiState.dexoptNextRunAt,
+                        onScheduleEnabledChange = onSetDexoptSchedule,
+                        onScheduleIntervalChange = onSetDexoptInterval,
+                        onRun = onRunBooster,
+                        onStop = onStopBooster
+                    )
                 }
                 // One card for everything that lives in Android's own Developer Options. These used to
                 // be scattered across three sections, which made them look like separate features
                 // rather than the one screen's worth of switches they actually are.
                 ExpandableToolCard(
-                    title = "Developer Options",
-                    subtitle = "Speed up menus and background apps.",
+                    title = stringResource(R.string.gt_tool_devopts_title),
+                    subtitle = stringResource(R.string.gt_tool_devopts_sub),
                     icon = Icons.Default.DeveloperMode
                 ) {
                     DeveloperOptionsContent(
@@ -416,7 +445,7 @@ fun GamingToolsScreen(
                     )
                 }
 
-                ExpandableToolCard(title = "Screen Size", subtitle = "Make the screen easier to draw.", icon = Icons.Default.AspectRatio) {
+                ExpandableToolCard(title = stringResource(R.string.gt_tool_screen_title), subtitle = stringResource(R.string.gt_tool_screen_sub), icon = Icons.Default.AspectRatio) {
                     ResolutionChangerContent(
                         native = uiState.nativeResolution,
                         source = uiState.resolutionSource,
@@ -436,8 +465,8 @@ fun GamingToolsScreen(
                     )
                 }
 
-                FeatureToggleCard(title = "FPS Monitor", subtitle = "Show how smooth your game is running.", icon = Icons.Default.BarChart, checked = uiState.isOverlayRunning, onCheckedChange = onToggleOverlay)
-                ExpandableToolCard(title = "Crosshair", subtitle = "Put an aiming mark in the middle.", icon = Icons.Default.AddCircleOutline, isToggleable = true, isToggled = uiState.isCrosshairRunning, onToggleChange = onToggleCrosshair, forceExpand = uiState.isCrosshairRunning) {
+                FeatureToggleCard(title = stringResource(R.string.gt_tool_fps_title), subtitle = stringResource(R.string.gt_tool_fps_sub), icon = Icons.Default.BarChart, checked = uiState.isOverlayRunning, onCheckedChange = onToggleOverlay)
+                ExpandableToolCard(title = stringResource(R.string.gt_tool_crosshair_title), subtitle = stringResource(R.string.gt_tool_crosshair_sub), icon = Icons.Default.AddCircleOutline, isToggleable = true, isToggled = uiState.isCrosshairRunning, onToggleChange = onToggleCrosshair, forceExpand = uiState.isCrosshairRunning) {
                     CrosshairPicker(
                         selected = uiState.selectedCrosshair,
                         onSelect = onSelectCrosshair,
@@ -451,16 +480,16 @@ fun GamingToolsScreen(
             }
 
             Spacer(modifier = Modifier.height(24.dp))
-            Text(stringResource(R.string.gt_section_focus_network), style = MaterialTheme.typography.labelSmall, color = Color.Gray, modifier = Modifier.padding(bottom = 12.dp))
+            Text(stringResource(R.string.gt_section_focus_network), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 12.dp))
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                FeatureToggleCard(title = "Do Not Disturb", subtitle = "Silence notifications while you play.", icon = Icons.Default.NotificationsOff, checked = uiState.isDndEnabled, onCheckedChange = onToggleDnd)
+                FeatureToggleCard(title = stringResource(R.string.gt_tool_dnd_title), subtitle = stringResource(R.string.gt_tool_dnd_sub), icon = Icons.Default.NotificationsOff, checked = uiState.isDndEnabled, onCheckedChange = onToggleDnd)
                 // Two independent ways to stop other apps using the network, and the card carries no
                 // toggle of its own: each switch lives in the body with its own state and its own
                 // requirement, because they are different mechanisms and either, both, or neither is a
                 // valid choice. The card title used to imply one method with one switch.
                 ExpandableToolCard(
-                    title = "Stop Other Apps Using Data",
-                    subtitle = "Keep other apps off the internet.",
+                    title = stringResource(R.string.gt_tool_net_title),
+                    subtitle = stringResource(R.string.gt_tool_net_sub),
                     icon = Icons.Default.VpnLock
                 ) {
                     BackgroundDataContent(
@@ -475,8 +504,8 @@ fun GamingToolsScreen(
                     )
                 }
                 ExpandableToolCard(
-                    title = "Faster Address Lookups",
-                    subtitle = "Choose a quicker, more private phone book.",
+                    title = stringResource(R.string.gt_tool_dns_title),
+                    subtitle = stringResource(R.string.gt_tool_dns_sub),
                     icon = Icons.Default.Dns
                 ) {
                     DnsContent(
@@ -491,19 +520,17 @@ fun GamingToolsScreen(
             }
 
             Spacer(modifier = Modifier.height(24.dp))
-            Text(stringResource(R.string.gt_section_system_advanced), style = MaterialTheme.typography.labelSmall, color = Color.Gray, modifier = Modifier.padding(bottom = 12.dp))
+            Text(stringResource(R.string.gt_section_system_advanced), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 12.dp))
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 ExpandableToolCard(
-                    title = "Auto Force Stop",
-                    subtitle = "Close apps you leave, except your chosen ones.",
+                    title = stringResource(R.string.gt_tool_afs_title),
+                    subtitle = stringResource(R.string.gt_tool_afs_sub),
                     icon = Icons.Default.Security,
                     isToggleable = true,
                     isToggled = uiState.isAutoForceStopActive,
                     onToggleChange = onToggleAutoForceStop,
                     enabled = hasPrivilege,
-                    requirementNote = "Needs root or Shizuku. Android does not let a normal app close " +
-                        "other apps. Shizuku is a free helper app that lends this app that power " +
-                        "without root."
+                    requirementNote = stringResource(R.string.gt_tool_afs_need)
                 ) {
                     AutoForceStopContent(
                         apps = uiState.allApps,
@@ -512,8 +539,24 @@ fun GamingToolsScreen(
                         onToggle = onToggleAutoForceStopKeepPackage
                     )
                 }
-                ExpandableToolCard(title = "Cleaner", subtitle = "Free up space by deleting leftovers.", icon = Icons.Default.DeleteSweep) {
-                    CleaningContent(uiState.isRooted, uiState.isShizukuActive, uiState.cleanResult, uiState.scanReport, uiState.isScanningJunk, uiState.isCleaningJunk, onScanJunk, onPerformMaintenance, onGrantStorageAccess)
+                ExpandableToolCard(title = stringResource(R.string.gt_tool_cleaner_title), subtitle = stringResource(R.string.gt_tool_cleaner_sub), icon = Icons.Default.DeleteSweep) {
+                    CleaningContent(
+                        isRooted = uiState.isRooted,
+                        isShizukuActive = uiState.isShizukuActive,
+                        cleanResult = uiState.cleanResult,
+                        report = uiState.scanReport,
+                        isScanning = uiState.isScanningJunk,
+                        isCleaning = uiState.isCleaningJunk,
+                        keepEntries = uiState.cleanerKeepEntries,
+                        cleanPatterns = uiState.cleanerCleanPatterns,
+                        onAddKeepEntry = onAddCleanerKeepEntry,
+                        onRemoveKeepEntry = onRemoveCleanerKeepEntry,
+                        onAddCleanPattern = onAddCleanerCleanPattern,
+                        onRemoveCleanPattern = onRemoveCleanerCleanPattern,
+                        onScan = onScanJunk,
+                        onPerform = onPerformMaintenance,
+                        onGrantStorageAccess = onGrantStorageAccess
+                    )
                 }
             }
         }
@@ -525,20 +568,20 @@ fun GameLibraryCard(game: GameInfo, onLaunch: (String) -> Unit, onRemove: (Strin
     Surface(
         modifier = Modifier.width(140.dp).clip(RoundedCornerShape(18.dp)),
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Box {
             Column(modifier = Modifier.padding(12.dp)) {
                 Image(bitmap = game.icon.toBitmap().asImageBitmap(), contentDescription = null, modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)))
                 Spacer(modifier = Modifier.height(12.dp))
-                Text(text = game.appName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(text = game.appName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(modifier = Modifier.height(12.dp))
-                Button(onClick = { onLaunch(game.packageName) }, modifier = Modifier.fillMaxWidth().height(32.dp), contentPadding = PaddingValues(0.dp), shape = RoundedCornerShape(8.dp)) {
-                    Text("LAUNCH", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                CatsmokerButton(onClick = { onLaunch(game.packageName) }, modifier = Modifier.fillMaxWidth().height(32.dp), contentPadding = PaddingValues(0.dp), shape = RoundedCornerShape(8.dp)) {
+                    Text(stringResource(R.string.gt_library_launch), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
             }
             IconButton(onClick = { onRemove(game.packageName) }, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(24.dp)) {
-                Icon(Icons.Default.Remove, "Remove", tint = Color.Gray.copy(alpha = 0.8f), modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.Remove, stringResource(R.string.gt_library_remove), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f), modifier = Modifier.size(16.dp))
             }
         }
     }
@@ -548,11 +591,11 @@ fun GameLibraryCard(game: GameInfo, onLaunch: (String) -> Unit, onRemove: (Strin
 fun FeatureToggleCard(title: String, subtitle: String, icon: ImageVector, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
     SectionCard(enabled = enabled) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(if (enabled) Color.White.copy(alpha = 0.05f) else Color.Gray.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) { Icon(icon, null, tint = if (enabled) Color.White else Color.DarkGray, modifier = Modifier.size(20.dp)) }
+            Box(modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(if (enabled) MaterialTheme.colorScheme.surfaceVariant else Color.Gray.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) { Icon(icon, null, tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp)) }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.Bold, color = if (enabled) Color.White else Color.Gray, fontSize = 15.sp)
-                Text(subtitle, color = if (enabled) Color.Gray else Color.DarkGray, fontSize = 12.sp)
+                Text(title, fontWeight = FontWeight.Bold, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
+                Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
             Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
         }
@@ -575,16 +618,16 @@ fun ExpandableToolCard(title: String, subtitle: String, icon: ImageVector, isTog
     SectionCard(enabled = enabled) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(if (enabled) Color.White.copy(alpha = 0.05f) else Color.Gray.copy(alpha = 0.1f)).clickable(enabled = enabled) { expanded = !expanded }, contentAlignment = Alignment.Center) { Icon(icon, null, tint = if (enabled) Color.White else Color.DarkGray, modifier = Modifier.size(20.dp)) }
+                Box(modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(if (enabled) MaterialTheme.colorScheme.surfaceVariant else Color.Gray.copy(alpha = 0.1f)).clickable(enabled = enabled) { expanded = !expanded }, contentAlignment = Alignment.Center) { Icon(icon, null, tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp)) }
                 Spacer(modifier = Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f).clickable(enabled = enabled) { expanded = !expanded }) {
-                    Text(title, fontWeight = FontWeight.Bold, color = if (enabled) Color.White else Color.Gray, fontSize = 15.sp)
-                    Text(subtitle, color = if (enabled) Color.Gray else Color.DarkGray, fontSize = 12.sp)
+                    Text(title, fontWeight = FontWeight.Bold, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
+                    Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 }
                 if (isToggleable) {
                     Switch(checked = isToggled, onCheckedChange = onToggleChange, enabled = enabled)
                 } else {
-                    IconButton(onClick = { expanded = !expanded }, enabled = enabled) { Icon(if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, null, tint = if (enabled) Color.Gray else Color.DarkGray) }
+                    IconButton(onClick = { expanded = !expanded }, enabled = enabled) { Icon(if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, null, tint = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
             }
             if (!enabled && requirementNote != null) {
@@ -592,7 +635,7 @@ fun ExpandableToolCard(title: String, subtitle: String, icon: ImageVector, isTog
                 RequirementNotice(requirementNote)
             }
             if (expanded && enabled) {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = Color.White.copy(alpha = 0.05f))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 content()
             }
         }
@@ -641,48 +684,44 @@ fun ResolutionChangerContent(
     }
     Column(modifier = Modifier.fillMaxWidth()) {
         if (native != null && native.isValid) {
-            Text("Your screen: ${native.label}", fontSize = 12.sp, color = Color.White)
+            Text(stringResource(R.string.gt_res_your_screen, native.label), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
         } else {
             Text(
-                "Your phone did not report its screen size, so there are no ready-made choices below.",
+                stringResource(R.string.gt_res_unknown_screen),
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.error
             )
         }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = activeOverride?.let { "Changed to: ${it.label}" } ?: "Not changed — using your screen's own size",
+            text = activeOverride?.let { stringResource(R.string.gt_res_changed_to, it.label) } ?: stringResource(R.string.gt_res_not_changed),
             fontSize = 11.sp,
-            color = if (activeOverride != null) MaterialTheme.colorScheme.primary else Color.Gray
+            color = if (activeOverride != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Spacer(modifier = Modifier.height(10.dp))
         ExplainerBox(
-            title = "What is this?",
+            title = stringResource(R.string.gt_explainer_what),
             lines = listOf(
-                "It tells your phone to pretend the screen has fewer dots than it really has. " +
-                    "Games then have less to draw, so they can run smoother.",
-                "Everything looks a little less sharp while it is on. \"Reset\" puts it back.",
-                "The third number, DPI, is how big everything looks. Lower makes text and buttons " +
-                    "smaller, higher makes them bigger."
+                stringResource(R.string.gt_res_what_1),
+                stringResource(R.string.gt_res_what_2),
+                stringResource(R.string.gt_res_what_3)
             )
         )
         Spacer(modifier = Modifier.height(6.dp))
         ExplainerBox(
-            title = "Is it safe?",
+            title = stringResource(R.string.gt_res_safe_title),
             accent = Color(0xFFFFB300),
             lines = listOf(
-                "Yes, but odd numbers can make things look stretched or leave black edges. The " +
-                    "ready-made choices keep the same shape as your screen, so they are the safe ones.",
-                "If the screen ever looks wrong, press \"Reset\". Restarting your phone also undoes it.",
-                "Your phone's real screen size was read from " + (native?.let { source } ?: "your phone") +
-                    ", so the choices below are made from your actual screen and not guessed."
+                stringResource(R.string.gt_res_safe_1),
+                stringResource(R.string.gt_res_safe_2),
+                stringResource(R.string.gt_res_safe_3, native?.let { source } ?: stringResource(R.string.gt_res_safe_source_phone))
             )
         )
 
         if (options.isNotEmpty()) {
             Spacer(modifier = Modifier.height(16.dp))
-            Text("Choose a size", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            Text(stringResource(R.string.gt_res_choose_size), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(modifier = Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -699,7 +738,7 @@ fun ResolutionChangerContent(
             // The numbers behind the chosen preset, so nothing is applied unseen.
             options.firstOrNull { it.id == selectedOptionId }?.target?.let { target ->
                 Spacer(modifier = Modifier.height(6.dp))
-                Text("This one sets ${target.label}", fontSize = 10.sp, color = Color.Gray)
+                Text(stringResource(R.string.gt_res_preset_sets, target.label), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
@@ -708,7 +747,7 @@ fun ResolutionChangerContent(
         // before it is applied, but the keyboard never opens for them.
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(
-                value = width, onValueChange = onWidthChange, label = { Text("Width") },
+                value = width, onValueChange = onWidthChange, label = { Text(stringResource(R.string.gt_res_width)) },
                 singleLine = true,
                 readOnly = !editable,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -716,7 +755,7 @@ fun ResolutionChangerContent(
                 modifier = Modifier.weight(1f)
             )
             OutlinedTextField(
-                value = height, onValueChange = onHeightChange, label = { Text("Height") },
+                value = height, onValueChange = onHeightChange, label = { Text(stringResource(R.string.gt_res_height)) },
                 singleLine = true,
                 readOnly = !editable,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -726,7 +765,7 @@ fun ResolutionChangerContent(
         }
         Spacer(modifier = Modifier.height(12.dp))
         OutlinedTextField(
-            value = dpi, onValueChange = onDpiChange, label = { Text("DPI") },
+            value = dpi, onValueChange = onDpiChange, label = { Text(stringResource(R.string.gt_res_dpi)) },
             singleLine = true,
             readOnly = !editable,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -736,24 +775,29 @@ fun ResolutionChangerContent(
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = if (editable) "You can type your own numbers."
-            else "Locked to the preset above. Pick \"Custom\" to type your own numbers.",
+            text = if (editable) stringResource(R.string.gt_res_editable_hint)
+            else stringResource(R.string.gt_res_locked_hint),
             fontSize = 10.sp,
-            color = Color.Gray
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Spacer(modifier = Modifier.height(16.dp))
         if (channel == null) {
             RequirementNotice(
-                "Needs root or Shizuku. Android does not let a normal app resize the screen. " +
-                    "Shizuku is a free helper app that lends this app that power without root."
+                stringResource(R.string.gt_res_need)
             )
         } else {
-            Text("Ready — using $channel.", fontSize = 11.sp, color = Color.Gray)
+            Text(
+                stringResource(
+                    if (channel == "Root") R.string.gt_res_ready_root else R.string.gt_res_ready_shizuku
+                ),
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         Spacer(modifier = Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
+            CatsmokerButton(
                 onClick = onApply,
                 enabled = channel != null && validationError == null && !isApplying,
                 modifier = Modifier.weight(1f)
@@ -761,14 +805,14 @@ fun ResolutionChangerContent(
                 if (isApplying) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                 } else {
-                    Text("Apply")
+                    Text(stringResource(R.string.gt_res_apply))
                 }
             }
-            OutlinedButton(
+            CatsmokerOutlinedButton(
                 onClick = onReset,
                 enabled = channel != null && !isApplying,
                 modifier = Modifier.weight(0.6f)
-            ) { Text("Reset") }
+            ) { Text(stringResource(R.string.gt_res_reset)) }
         }
         if (log.isNotEmpty()) {
             Spacer(modifier = Modifier.height(16.dp))
@@ -810,36 +854,36 @@ fun CrosshairPicker(
     val context = LocalContext.current
     val scopes = remember { (1..7).map { "scope$it.png" } }
     Column {
-        Text("Select Style", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+        Text(stringResource(R.string.gt_crosshair_style), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(modifier = Modifier.height(12.dp))
         Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             scopes.forEach { scope ->
                 val isSelected = selected == scope
                 Surface(
                     modifier = Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)).clickable { onSelect(scope) },
-                    color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.03f),
+                    color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
                     border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
                 ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(8.dp)) {
                         val bitmap = remember(scope) { try { context.assets.open("crosshair/$scope").use { BitmapFactory.decodeStream(it) } } catch (_: Exception) { null } }
                         if (bitmap != null) Image(bitmap = bitmap.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize())
-                        else Icon(Icons.Default.BrokenImage, null, tint = Color.DarkGray)
+                        else Icon(Icons.Default.BrokenImage, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
-        Text("Position", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+        Text(stringResource(R.string.gt_crosshair_position), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             when {
-                !isRunning -> "Turn the crosshair on to move it."
-                isMoveMode -> "Drag the crosshair on screen. While moving, taps hit the crosshair instead of your game."
-                isOffCentre -> "Moved off centre. Tap Move to drag it again."
-                else -> "Centred. Tap Move to drag it anywhere."
+                !isRunning -> stringResource(R.string.gt_crosshair_off)
+                isMoveMode -> stringResource(R.string.gt_crosshair_move)
+                isOffCentre -> stringResource(R.string.gt_crosshair_recenter_hint)
+                else -> stringResource(R.string.gt_crosshair_centred)
             },
-            color = if (isMoveMode) MaterialTheme.colorScheme.primary else Color.Gray,
+            color = if (isMoveMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp
         )
         Spacer(modifier = Modifier.height(12.dp))
@@ -847,24 +891,24 @@ fun CrosshairPicker(
             // The label names the state it will move to, not the state it is in, so the button never
             // reads as a description of the current mode.
             if (isMoveMode) {
-                Button(onClick = { onSetMoveMode(false) }, modifier = Modifier.weight(1f)) {
+                CatsmokerButton(onClick = { onSetMoveMode(false) }, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.Check, null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Done")
+                    Text(stringResource(R.string.gt_crosshair_done))
                 }
             } else {
-                OutlinedButton(onClick = { onSetMoveMode(true) }, enabled = isRunning, modifier = Modifier.weight(1f)) {
+                CatsmokerOutlinedButton(onClick = { onSetMoveMode(true) }, enabled = isRunning, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.OpenWith, null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Move")
+                    Text(stringResource(R.string.gt_crosshair_move_btn))
                 }
             }
             // Offered whenever the crosshair is off centre, including while the overlay is off — the
             // stored offset outlives the overlay and would be reused at the next start.
-            OutlinedButton(onClick = onRecentre, enabled = isOffCentre, modifier = Modifier.weight(1f)) {
+            CatsmokerOutlinedButton(onClick = onRecentre, enabled = isOffCentre, modifier = Modifier.weight(1f)) {
                 Icon(Icons.Default.FilterCenterFocus, null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Centre")
+                Text(stringResource(R.string.gt_crosshair_centre))
             }
         }
     }
@@ -911,47 +955,36 @@ fun AutoForceStopContent(
 
     Column(modifier = Modifier.fillMaxWidth()) {
         ExplainerBox(
-            title = "What is this?",
+            title = stringResource(R.string.gt_explainer_what),
             lines = listOf(
-                "When you leave an app, this closes it for you. Closing an app frees up memory and " +
-                    "stops it slowing your game down.",
-                "Tick an app below to keep it open. Everything you do not tick gets closed when you " +
-                    "leave it.",
-                "Your home screen, your keyboard, this app, and your phone's built-in apps are never " +
-                    "closed, even if you do not tick them."
+                stringResource(R.string.gt_afs_what_1),
+                stringResource(R.string.gt_afs_what_2),
+                stringResource(R.string.gt_afs_what_3)
             )
         )
         Spacer(modifier = Modifier.height(8.dp))
         ExplainerBox(
-            title = "What permission does it need?",
+            title = stringResource(R.string.gt_afs_perm_title),
             lines = listOf(
-                "Two things. First, \"Usage access\" — that is what lets this app see which app you " +
-                    "are looking at. You turn it on yourself in Android's settings; there is a button " +
-                    "below if it is missing.",
-                "Second, root or Shizuku. Android does not let a normal app close another app, so " +
-                    "without one of these nothing will be closed. Shizuku is a helper app that lends " +
-                    "this app some extra powers without root.",
-                "If either one is missing, the switch stays on but the notification will tell you " +
-                    "nothing is being closed. It will not pretend to work."
+                stringResource(R.string.gt_afs_perm_1),
+                stringResource(R.string.gt_afs_perm_2),
+                stringResource(R.string.gt_afs_perm_3)
             ),
             accent = Color(0xFFFFB300)
         )
         Spacer(modifier = Modifier.height(8.dp))
         ExplainerBox(
-            title = "Should I use it?",
+            title = stringResource(R.string.gt_afs_should_title),
             accent = Color(0xFFFFB300),
             lines = listOf(
-                "It helps most if you leave heavy apps open — a browser with lots of tabs, a video " +
-                    "app, a social app.",
-                "The cost: a closed app takes longer to open next time, and a closed chat app will " +
-                    "not show you new messages until you open it again. Tick your chat apps to keep " +
-                    "them running.",
-                "Gaming Mode already pauses other apps while you play, so you do not need both."
+                stringResource(R.string.gt_afs_should_1),
+                stringResource(R.string.gt_afs_should_2),
+                stringResource(R.string.gt_afs_should_3)
             )
         )
         if (!hasPrivilege) {
             Spacer(modifier = Modifier.height(8.dp))
-            RequirementNotice("Needs root or Shizuku. Without one, Android will not let this app close anything.")
+            RequirementNotice(stringResource(R.string.gt_needs_root_shizuku_close))
         }
         if (!hasUsageAccess) {
             Spacer(modifier = Modifier.height(8.dp))
@@ -963,32 +996,31 @@ fun AutoForceStopContent(
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text("Usage access is off", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE53935))
+                Text(stringResource(R.string.gt_afs_usage_off_title), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE53935))
                 Text(
-                    "This needs to see which app you are using. Until you turn it on, nothing will " +
-                        "be closed.",
+                    stringResource(R.string.gt_afs_usage_off_text),
                     fontSize = 11.sp,
                     color = Color(0xFFE53935),
                     lineHeight = 15.sp
                 )
-                OutlinedButton(onClick = {
+                CatsmokerOutlinedButton(onClick = {
                     runCatching {
                         context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
                     }.onFailure {
                         context.startActivity(Intent(Settings.ACTION_SETTINGS))
                     }
-                }) { Text("Turn on usage access") }
+                }) { Text(stringResource(R.string.gt_afs_usage_btn)) }
             }
         }
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            text = if (kept.isEmpty()) "Keeping 0 apps open — every app you leave will be closed"
-            else "Keeping ${kept.size} app(s) open",
+            text = if (kept.isEmpty()) stringResource(R.string.gt_afs_keep_none)
+            else stringResource(R.string.gt_afs_keep_some, kept.size),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.primary
         )
         Spacer(modifier = Modifier.height(4.dp))
-        Text("Tick an app to keep it open", fontSize = 10.sp, color = Color.Gray)
+        Text(stringResource(R.string.gt_afs_tick_hint), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(modifier = Modifier.height(8.dp))
         androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.heightIn(max = 260.dp)) {
             items(apps) { app ->
@@ -996,7 +1028,7 @@ fun AutoForceStopContent(
                     Checkbox(checked = kept.contains(app.packageName), onCheckedChange = { onToggle(app.packageName) })
                     Image(bitmap = app.icon.toBitmap().asImageBitmap(), contentDescription = null, modifier = Modifier.size(24.dp).clip(RoundedCornerShape(4.dp)))
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text(app.appName, color = Color.White, modifier = Modifier.weight(1f))
+                    Text(app.appName, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                 }
             }
         }
@@ -1050,6 +1082,12 @@ fun CleaningContent(
     report: CleaningFeature.ScanReport?,
     isScanning: Boolean,
     isCleaning: Boolean,
+    keepEntries: Set<String>,
+    cleanPatterns: Set<String>,
+    onAddKeepEntry: (String) -> Unit,
+    onRemoveKeepEntry: (String) -> Unit,
+    onAddCleanPattern: (String) -> Unit,
+    onRemoveCleanPattern: (String) -> Unit,
     onScan: () -> Unit,
     onPerform: (List<CleaningFeature.Category>) -> Unit,
     onGrantStorageAccess: () -> Unit
@@ -1060,44 +1098,41 @@ fun CleaningContent(
         // Names the channel that will actually do the deleting, because it decides how much of the
         // device can be reached — a normal app cannot see another app's cache at all.
         Text(
-            "Can reach: ${
+            stringResource(
+                R.string.gt_cleaner_reach,
                 when {
-                    isRooted -> "everything (root)"
-                    isShizukuActive -> "more than usual (Shizuku)"
-                    else -> "only what Android allows a normal app"
+                    isRooted -> stringResource(R.string.gt_cleaner_reach_root)
+                    isShizukuActive -> stringResource(R.string.gt_cleaner_reach_shizuku)
+                    else -> stringResource(R.string.gt_cleaner_reach_plain)
                 }
-            }",
+            ),
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.primary
         )
         Spacer(modifier = Modifier.height(8.dp))
         ExplainerBox(
-            title = "What is this?",
+            title = stringResource(R.string.gt_explainer_what),
             lines = listOf(
-                "It looks for files your phone no longer needs — leftovers, empty files and empty " +
-                    "folders — and can delete them to free up space.",
-                "\"Scan\" only looks. Nothing is deleted until you press \"Clean\".",
-                "The number next to each row is how many things were found and how much space they " +
-                    "take. It is measured, not estimated."
+                stringResource(R.string.gt_cleaner_what_1),
+                stringResource(R.string.gt_cleaner_what_2),
+                stringResource(R.string.gt_cleaner_what_3)
             )
         )
         Spacer(modifier = Modifier.height(4.dp))
         ExplainerBox(
-            title = "Is it safe? What are the red ones?",
+            title = stringResource(R.string.gt_cleaner_safe_title),
             accent = Color(0xFFFFB300),
             lines = listOf(
-                "The normal rows are safe: your phone rebuilds those files by itself when it needs " +
-                    "them again.",
-                "The rows written in red are stronger. They can log you out of apps or make an app " +
-                    "start slowly the first time after cleaning. They are unticked to begin with.",
-                "Your photos, messages, files and apps are never touched."
+                stringResource(R.string.gt_cleaner_safe_1),
+                stringResource(R.string.gt_cleaner_safe_2),
+                stringResource(R.string.gt_cleaner_safe_3)
             )
         )
         Spacer(modifier = Modifier.height(8.dp))
         CleaningFeature.Category.entries.forEach { category ->
             Row(modifier = Modifier.fillMaxWidth().clickable { selectedCategories = if (selectedCategories.contains(category)) selectedCategories - category else selectedCategories + category }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = selectedCategories.contains(category), onCheckedChange = { checked -> selectedCategories = if (checked) selectedCategories + category else selectedCategories - category })
-                Text(category.label, modifier = Modifier.weight(1f), color = if (category.isAggressive) Color.Red else Color.White)
+                Text(categoryLabel(category), modifier = Modifier.weight(1f), color = if (category.isAggressive) Color.Red else MaterialTheme.colorScheme.onSurface)
                 // Only a measured size is shown as a size. "Not scanned" and "none found" are
                 // different outcomes and neither of them is 0 B.
                 val entry = resultsByCategory[category]
@@ -1106,20 +1141,30 @@ fun CleaningContent(
                     // The count leads, because empty files and empty folders are real finds that
                     // reclaim no bytes — a bare "0 B" there reads as "found nothing".
                     entry != null -> Text(
-                        "${entry.itemCount} · ${formatBytes(entry.sizeBytes)}",
+                        stringResource(R.string.gt_cleaner_found_count, entry.itemCount, formatBytes(entry.sizeBytes)),
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.primary
                     )
-                    report.scannedAnything -> Text("none found", fontSize = 11.sp, color = Color.Gray)
-                    else -> Text("not scanned", fontSize = 11.sp, color = Color(0xFFFFB300))
+                    report.scannedAnything -> Text(stringResource(R.string.gt_cleaner_none_found), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else -> Text(stringResource(R.string.gt_cleaner_not_scanned), fontSize = 11.sp, color = Color(0xFFFFB300))
                 }
             }
         }
         Spacer(modifier = Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onScan, modifier = Modifier.weight(1f), enabled = !isScanning && !isCleaning) { Text(if (isScanning) "Looking..." else "Scan") }
-            Button(onClick = { onPerform(selectedCategories.toList()) }, modifier = Modifier.weight(1f), enabled = !isScanning && !isCleaning && selectedCategories.isNotEmpty()) { Text(if (isCleaning) "Cleaning..." else "Clean") }
+            CatsmokerButton(onClick = onScan, modifier = Modifier.weight(1f), enabled = !isScanning && !isCleaning) { Text(if (isScanning) stringResource(R.string.gt_cleaner_scanning) else stringResource(R.string.gt_cleaner_scan)) }
+            CatsmokerButton(onClick = { onPerform(selectedCategories.toList()) }, modifier = Modifier.weight(1f), enabled = !isScanning && !isCleaning && selectedCategories.isNotEmpty()) { Text(if (isCleaning) stringResource(R.string.gt_cleaner_cleaning) else stringResource(R.string.gt_cleaner_clean)) }
         }
+
+        // Rule editing sits between the buttons and the result: it is the one part of the card
+        // that takes input rather than reporting it, and it only matters once a scan exists to
+        // show its effect on.
+        CleanerRulesEditor(
+            keepCount = keepEntries.size,
+            patternCount = cleanPatterns.size,
+            onAddKeepEntry = onAddKeepEntry,
+            onAddCleanPattern = onAddCleanPattern
+        )
 
         // The outcome of the last clean, in one line. This replaced a scrolling terminal view: the
         // figures are the same measured counts the log lines were built from, so nothing is lost, but
@@ -1133,14 +1178,14 @@ fun CleaningContent(
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = when {
-                    !report.scannedAnything -> "Your storage could not be read, so nothing was measured."
-                    report.results.isEmpty() -> "Looked everywhere — there is nothing to clean."
+                    !report.scannedAnything -> stringResource(R.string.gt_cleaner_unreadable)
+                    report.results.isEmpty() -> stringResource(R.string.gt_cleaner_looked_empty)
                     report.totalBytes == 0L ->
-                        "${report.totalItems} things to remove — all empty, so no space is freed."
-                    else -> "Can free up ${formatBytes(report.totalBytes)} from ${report.totalItems} things"
+                        stringResource(R.string.gt_cleaner_empty_only, report.totalItems)
+                    else -> stringResource(R.string.gt_cleaner_can_free, formatBytes(report.totalBytes), report.totalItems)
                 },
                 fontSize = 12.sp,
-                color = if (report.scannedAnything) Color.LightGray else Color(0xFFFFB300)
+                color = if (report.scannedAnything) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f) else Color(0xFFFFB300)
             )
 
             if (report.limitations.isNotEmpty()) {
@@ -1153,7 +1198,7 @@ fun CleaningContent(
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text("What this could not check:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFB300))
+                    Text(stringResource(R.string.gt_cleaner_limitations_title), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFB300))
                     report.limitations.forEach { limitation ->
                         Text("• $limitation", fontSize = 11.sp, color = Color(0xFFFFB300), lineHeight = 15.sp)
                     }
@@ -1162,9 +1207,136 @@ fun CleaningContent(
 
             if (report.needsAllFilesAccess) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = onGrantStorageAccess, modifier = Modifier.fillMaxWidth()) {
-                    Text("Let this app see all files")
+                CatsmokerButton(onClick = onGrantStorageAccess, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.gt_cleaner_grant))
                 }
+            }
+
+            if (keepEntries.isNotEmpty() || cleanPatterns.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                CleanerRulesSummary(
+                    keepEntries = keepEntries,
+                    cleanPatterns = cleanPatterns,
+                    onRemoveKeepEntry = onRemoveKeepEntry,
+                    onRemoveCleanPattern = onRemoveCleanPattern
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The user's own keep/clean rules, listed with a way to remove each.
+ *
+ * Shown only when at least one rule exists — the empty state is the common case and needs no UI.
+ * A rule change applies from the *next* scan, not to the report already on screen, so the row
+ * never pretends a rule edited the numbers above it.
+ */@Composable
+private fun CleanerRulesSummary(
+    keepEntries: Set<String>,
+    cleanPatterns: Set<String>,
+    onRemoveKeepEntry: (String) -> Unit,
+    onRemoveCleanPattern: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF64B5F6).copy(alpha = 0.10f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(stringResource(R.string.gt_cleaner_rules_title), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF64B5F6))
+        keepEntries.forEach { entry ->
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.gt_cleaner_rule_keep, entry), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                IconButton(onClick = { onRemoveKeepEntry(entry) }, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.gt_cleaner_remove_keep), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
+                }
+            }
+        }
+        cleanPatterns.forEach { pattern ->
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.gt_cleaner_rule_clean, pattern), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                IconButton(onClick = { onRemoveCleanPattern(pattern) }, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.gt_cleaner_remove_clean), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Collapsed entry point for adding keep entries and clean patterns.
+ *
+ * Both kinds are typed free-form, so the editor stays one expanded section with two fields rather
+ * than two dialogs. Keep entries are plain text (a path or a bare file name); clean patterns are
+ * regular-expression text matched against the whole path, and an invalid one is rejected by the
+ * ViewModel with a toast rather than stored to break every later scan.
+ */
+@Composable
+private fun CleanerRulesEditor(
+    keepCount: Int,
+    patternCount: Int,
+    onAddKeepEntry: (String) -> Unit,
+    onAddCleanPattern: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var keepInput by remember { mutableStateOf("") }
+    var patternInput by remember { mutableStateOf("") }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        TextButton(onClick = { expanded = !expanded }) {
+            val ruleCount = keepCount + patternCount
+            Text(
+                if (expanded) stringResource(R.string.gt_cleaner_rules_hide)
+                else if (ruleCount > 0) stringResource(R.string.gt_cleaner_rules_add_count, ruleCount)
+                else stringResource(R.string.gt_cleaner_rules_add),
+                fontSize = 12.sp
+            )
+        }
+        if (expanded) {
+            Text(
+                stringResource(R.string.gt_cleaner_rules_help),
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 15.sp
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(
+                    value = keepInput,
+                    onValueChange = { keepInput = it },
+                    placeholder = { Text(stringResource(R.string.gt_cleaner_keep_hint), fontSize = 11.sp) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                )
+                CatsmokerButton(
+                    onClick = {
+                        onAddKeepEntry(keepInput)
+                        keepInput = ""
+                    },
+                    enabled = keepInput.isNotBlank()
+                ) { Text(stringResource(R.string.gt_cleaner_add)) }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(
+                    value = patternInput,
+                    onValueChange = { patternInput = it },
+                    placeholder = { Text(stringResource(R.string.gt_cleaner_pattern_hint), fontSize = 11.sp) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                )
+                CatsmokerButton(
+                    onClick = {
+                        onAddCleanPattern(patternInput)
+                        patternInput = ""
+                    },
+                    enabled = patternInput.isNotBlank()
+                ) { Text(stringResource(R.string.gt_cleaner_add)) }
             }
         }
     }
@@ -1183,38 +1355,35 @@ private fun CleanResultRow(result: CleaningFeature.CleanResult) {
     val success = !result.removedNothing
     val accent = if (success) Color(0xFF4CAF50) else Color(0xFFFFB300)
     val headline = when {
-        result.removedNothing && result.failedItems > 0 -> "Nothing could be removed"
-        result.removedNothing -> "Nothing was removed"
+        result.removedNothing && result.failedItems > 0 -> stringResource(R.string.gt_cleaner_result_nothing_failed)
+        result.removedNothing -> stringResource(R.string.gt_cleaner_result_nothing)
         // A size of zero after real deletions means everything removed was empty, which is a
         // different fact from having freed nothing measurable.
         result.freedBytes == 0L && result.unmeasuredItems == 0 ->
-            "Cleaned ${result.deletedItems} empty things — they took up no space"
+            stringResource(R.string.gt_cleaner_result_empty, result.deletedItems)
         result.unmeasuredItems > 0 ->
-            "Freed at least ${formatBytes(result.freedBytes)}"
-        else -> "Freed ${formatBytes(result.freedBytes)}"
+            stringResource(R.string.gt_cleaner_result_at_least, formatBytes(result.freedBytes))
+        else -> stringResource(R.string.gt_cleaner_result_freed, formatBytes(result.freedBytes))
     }
 
     // Every count that is not zero gets said out loud. An item that was listed and then not removed
     // has to be accounted for somewhere, or the headline overstates what happened.
     val details = buildList {
-        if (!result.removedNothing) add("${result.deletedItems} things deleted")
+        if (!result.removedNothing) add(Pair(R.string.gt_cleaner_detail_deleted, result.deletedItems))
         if (result.unmeasuredItems > 0) {
-            add("${result.unmeasuredItems} of them would not say how big they were, so the real total is a little more")
+            add(Pair(R.string.gt_cleaner_detail_unmeasured, result.unmeasuredItems))
         }
         if (result.failedItems > 0) {
             add(
-                if (result.privileged) {
-                    "${result.failedItems} your phone would not let go of"
-                } else {
-                    "${result.failedItems} need root or Shizuku to delete"
-                }
+                Pair(
+                    if (result.privileged) R.string.gt_cleaner_detail_failed_priv
+                    else R.string.gt_cleaner_detail_failed_nopriv,
+                    result.failedItems
+                )
             )
         }
-        if (result.alreadyGoneItems > 0) add("${result.alreadyGoneItems} had already gone by themselves")
-        if (result.protectedSkips > 0) add("${result.protectedSkips} were left alone on purpose, to be safe")
-        if (result.trimmedInternalCaches) {
-            add("Your phone also cleared some app leftovers itself — that space is not counted above")
-        }
+        if (result.alreadyGoneItems > 0) add(Pair(R.string.gt_cleaner_detail_gone, result.alreadyGoneItems))
+        if (result.protectedSkips > 0) add(Pair(R.string.gt_cleaner_detail_protected, result.protectedSkips))
     }
 
     Column(
@@ -1235,11 +1404,32 @@ private fun CleanResultRow(result: CleaningFeature.CleanResult) {
             Spacer(modifier = Modifier.width(8.dp))
             Text(headline, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = accent)
         }
-        details.forEach { line ->
-            Text("• $line", fontSize = 11.sp, color = Color.LightGray, lineHeight = 15.sp)
+        details.forEach { (res, count) ->
+            Text("• " + stringResource(res, count), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f), lineHeight = 15.sp)
+        }
+        if (result.trimmedInternalCaches) {
+            Text("• " + stringResource(R.string.gt_cleaner_detail_trim), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f), lineHeight = 15.sp)
         }
     }
 }
+
+/**
+ * Localized label for a cleaner bucket. The enum itself carries the English words (it has no
+ * Context), so the mapping lives here at the call site inside the composable.
+ */
+@Composable
+private fun categoryLabel(category: CleaningFeature.Category): String = stringResource(
+    when (category) {
+        CleaningFeature.Category.CACHE -> R.string.gt_cat_cache
+        CleaningFeature.Category.TEMP -> R.string.gt_cat_temp
+        CleaningFeature.Category.THUMBNAILS -> R.string.gt_cat_thumbs
+        CleaningFeature.Category.EMPTY_FILES -> R.string.gt_cat_empty_files
+        CleaningFeature.Category.EMPTY_DIRS -> R.string.gt_cat_empty_dirs
+        CleaningFeature.Category.LOGS -> R.string.gt_cat_logs
+        CleaningFeature.Category.CORPSES -> R.string.gt_cat_corpses
+        CleaningFeature.Category.INSTALLERS -> R.string.gt_cat_installers
+    }
+)
 
 /**
  * Two independent ways to stop other apps using the network.
@@ -1271,22 +1461,20 @@ fun BackgroundDataContent(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         ExplainerBox(
-            title = "What is this?",
+            title = stringResource(R.string.gt_explainer_what),
             lines = listOf(
-                "It stops other apps using the internet in the background, so your game gets the whole " +
-                    "connection to itself.",
-                "There are two ways to do it. You can use one, or both at the same time. Your games are " +
-                    "always left alone."
+                stringResource(R.string.gt_net_what_1),
+                stringResource(R.string.gt_net_what_2)
             )
         )
 
         // ---------- Switch 1: the local VPN ----------
-        HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         NetworkBlockSwitch(
-            title = "App block (VPN)",
+            title = stringResource(R.string.gt_net_vpn_title),
             // Never called a firewall: it is a local VPN, and saying otherwise would misdescribe what
             // the app does. The subtitle names both the mechanism and the one real trade-off.
-            subtitle = "Works on Wi-Fi and mobile data. No root needed. Uses your phone's VPN slot.",
+            subtitle = stringResource(R.string.gt_net_vpn_sub),
             checked = vpnState.running,
             enabled = !isChangingVpn,
             busy = isChangingVpn,
@@ -1295,38 +1483,33 @@ fun BackgroundDataContent(
         Text(
             text = when {
                 vpnState.running && vpnState.blockedCount > 0 ->
-                    "On — stopping ${vpnState.blockedCount} apps"
-                vpnState.running -> "On"
-                else -> "Off"
+                    stringResource(R.string.gt_net_vpn_on_count, vpnState.blockedCount)
+                vpnState.running -> stringResource(R.string.gt_net_on)
+                else -> stringResource(R.string.gt_net_off)
             },
             fontSize = 11.sp,
-            color = if (vpnState.running) MaterialTheme.colorScheme.primary else Color.Gray
+            color = if (vpnState.running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
         )
         // Kept on screen after a failure so the switch flicking back off is explained rather than
         // looking like the tap was missed.
         vpnState.lastError?.let { error ->
-            Text("Could not turn it on: $error", fontSize = 11.sp, color = Color(0xFFEF9A9A), lineHeight = 15.sp)
+            Text(stringResource(R.string.gt_net_vpn_error, error), fontSize = 11.sp, color = Color(0xFFEF9A9A), lineHeight = 15.sp)
         }
         ExplainerBox(
-            title = "How does the VPN one work?",
+            title = stringResource(R.string.gt_net_vpn_how_title),
             lines = listOf(
-                "Android lets an app make a private connection, called a VPN, and choose which apps go " +
-                    "through it. This app sends the other apps into it and then drops everything they " +
-                    "send. Your games do not go through it at all, so they are untouched.",
-                "It is a VPN, not a firewall. Nothing is sent anywhere and nothing leaves your phone — " +
-                    "it simply goes nowhere.",
-                "Two things to know: a blocked app will look like it is loading forever instead of " +
-                    "saying \"no internet\", and your phone only allows one VPN at a time, so this " +
-                    "turns off any other VPN app you use.",
-                "Android will ask you once to allow it. If you say no, nothing is blocked."
+                stringResource(R.string.gt_net_vpn_how_1),
+                stringResource(R.string.gt_net_vpn_how_2),
+                stringResource(R.string.gt_net_vpn_how_3),
+                stringResource(R.string.gt_net_vpn_how_4)
             )
         )
 
         // ---------- Switch 2: Android's own Data Saver ----------
-        HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         NetworkBlockSwitch(
-            title = "Data Saver",
-            subtitle = "Android's own setting. Needs root or Shizuku. Mobile data only.",
+            title = stringResource(R.string.gt_net_ds_title),
+            subtitle = stringResource(R.string.gt_net_ds_sub),
             checked = status?.dataSaverOn == true,
             enabled = hasPrivilege && !isChanging,
             busy = isChanging,
@@ -1334,14 +1517,13 @@ fun BackgroundDataContent(
         )
         if (!hasPrivilege) {
             RequirementNotice(
-                "Data Saver needs root or Shizuku. Android does not let a normal app change it. " +
-                    "The VPN switch above still works without either."
+                stringResource(R.string.gt_net_ds_need)
             )
         }
 
         // --- Live state, or an honest gap where a reading should be ---
         when {
-            status == null -> Text("Checking…", fontSize = 12.sp, color = Color.Gray)
+            status == null -> Text(stringResource(R.string.gt_net_checking), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             else -> {
                 // Data Saver's own state and how many apps it is actually stopping, in one line, the
                 // same shape as the VPN switch above. This used to be two lines, the second listing
@@ -1352,72 +1534,71 @@ fun BackgroundDataContent(
                 val stoppedCount = status.restrictedUids.size
                 Text(
                     when {
-                        status.dataSaverOn == null -> "Your phone would not tell us if this is on or off"
-                        status.dataSaverOn == true && stoppedCount > 0 -> "On — stopping $stoppedCount apps"
-                        status.dataSaverOn == true -> "On"
+                        status.dataSaverOn == null -> stringResource(R.string.gt_net_unknown)
+                        status.dataSaverOn == true && stoppedCount > 0 -> stringResource(R.string.gt_net_ds_on_count, stoppedCount)
+                        status.dataSaverOn == true -> stringResource(R.string.gt_net_on)
                         // Off with apps still restricted is a real state, not a contradiction: the
                         // per-app blacklist blocks whether or not Data Saver is on, and `disable`
                         // deliberately leaves behind entries this app did not add.
-                        stoppedCount > 0 -> "Off — but $stoppedCount apps are still stopped"
-                        else -> "Off"
+                        stoppedCount > 0 -> stringResource(R.string.gt_net_ds_off_stopped, stoppedCount)
+                        else -> stringResource(R.string.gt_net_off)
                     },
                     fontSize = 11.sp,
                     color = if (status.dataSaverOn == null) Color(0xFFFFB74D) else MaterialTheme.colorScheme.primary
                 )
                 if (engaged) {
                     Text(
-                        "Turned on by Catsmoker — turning it off puts your phone back how it was.",
-                        fontSize = 11.sp, color = Color.Gray
+                        stringResource(R.string.gt_net_engaged),
+                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 Text(
                     when (status.meteredNow) {
-                        true -> "This network counts as mobile data, so Data Saver is working right now."
-                        false -> "You are on normal Wi-Fi, so Data Saver does nothing here. Use the VPN switch instead."
-                        null -> "We could not tell what kind of network you are on."
+                        true -> stringResource(R.string.gt_net_metered)
+                        false -> stringResource(R.string.gt_net_unmetered)
+                        null -> stringResource(R.string.gt_net_unknown_net)
                     },
                     fontSize = 11.sp,
-                    color = if (status.meteredNow == false) Color(0xFFFFB74D) else Color.Gray
+                    color = if (status.meteredNow == false) Color(0xFFFFB74D) else MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 // The per-app list is gone, but this stays: a build whose `cmd netpolicy` cannot list
                 // the blacklist is a real limitation the count line above cannot express, since an
                 // unreadable list and an empty one both leave `restrictedUids` empty.
                 if (!status.perAppSupported && status.privileged) {
                     Text(
-                        "Your phone's version cannot stop apps one by one, so only the whole-phone " +
-                            "Data Saver setting is available here.",
+                        stringResource(R.string.gt_net_no_perapp),
                         fontSize = 11.sp,
                         color = Color(0xFFFFB74D)
                     )
                 }
                 if (status.exemptedPackages.isNotEmpty()) {
                     Text(
-                        "Always allowed (${status.exemptedPackages.size}): ${status.exemptedPackages.joinToString()}",
-                        fontSize = 11.sp, color = Color.Gray
+                        stringResource(
+                            R.string.gt_net_exempt,
+                            status.exemptedPackages.size,
+                            status.exemptedPackages.joinToString()
+                        ),
+                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
         }
         ExplainerBox(
-            title = "How does Data Saver work?",
+            title = stringResource(R.string.gt_net_ds_how_title),
             lines = listOf(
-                "It uses the same setting you would find in Android's own settings, and asks your phone " +
-                    "to turn off background internet for other apps. Your games are added to the " +
-                    "\"always allowed\" list first, so they keep working.",
-                "Every change is read back from your phone afterwards, so what you see above is your " +
-                    "phone's answer, not a guess by this app.",
-                "It only works on mobile data, or Wi-Fi you have marked as costing money. On normal " +
-                    "Wi-Fi it does nothing — the VPN switch is the one that works everywhere."
+                stringResource(R.string.gt_net_ds_how_1),
+                stringResource(R.string.gt_net_ds_how_2),
+                stringResource(R.string.gt_net_ds_how_3)
             )
         )
         ExplainerBox(
-            title = "Which should I use?",
+            title = stringResource(R.string.gt_net_which_title),
             accent = Color(0xFFFFB300),
             lines = listOf(
-                "On mobile data: Data Saver alone is enough, and it costs no battery.",
-                "On Wi-Fi: use the VPN switch — Data Saver will not do anything.",
-                "Want the strongest setting: turn both on.",
-                "Neither one blocks the app you are actually looking at. That is on purpose."
+                stringResource(R.string.gt_net_which_1),
+                stringResource(R.string.gt_net_which_2),
+                stringResource(R.string.gt_net_which_3),
+                stringResource(R.string.gt_net_which_4)
             )
         )
     }
@@ -1445,9 +1626,9 @@ private fun NetworkBlockSwitch(
                 title,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (enabled) Color.White else Color.Gray
+                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Text(subtitle, fontSize = 10.sp, color = Color.Gray, lineHeight = 14.sp)
+            Text(subtitle, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 14.sp)
         }
         Spacer(modifier = Modifier.width(8.dp))
         if (busy) {
@@ -1495,110 +1676,96 @@ fun DeveloperOptionsContent(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // --- Animation scales ---
-        Text("Animation speed", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        Text(stringResource(R.string.gt_dev_anim), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
         ExplainerBox(
-            title = "What is this?",
+            title = stringResource(R.string.gt_explainer_what),
             lines = listOf(
-                "These control how fast your phone's menus slide and fade. 0.5× makes them twice as " +
-                    "fast, and Off removes them completely, so the phone feels snappier.",
-                "It does not change anything inside a game — only the screens around it."
+                stringResource(R.string.gt_dev_anim_what_1),
+                stringResource(R.string.gt_dev_anim_what_2)
             )
         )
         if (!canWriteGlobalSettings) {
             RequirementNotice(
-                "Needs root or Shizuku. Android does not let a normal app change these."
+                stringResource(R.string.gt_dev_anim_need)
             )
         }
-        AnimationScaleRow("Windows", AnimationScaleKind.WINDOW, animationScales.first, canWriteGlobalSettings, onSetAnimationScale)
-        AnimationScaleRow("Screen changes", AnimationScaleKind.TRANSITION, animationScales.second, canWriteGlobalSettings, onSetAnimationScale)
-        AnimationScaleRow("Everything else", AnimationScaleKind.ANIMATOR, animationScales.third, canWriteGlobalSettings, onSetAnimationScale)
+        AnimationScaleRow(stringResource(R.string.gt_dev_anim_windows), AnimationScaleKind.WINDOW, animationScales.first, canWriteGlobalSettings, onSetAnimationScale)
+        AnimationScaleRow(stringResource(R.string.gt_dev_anim_transition), AnimationScaleKind.TRANSITION, animationScales.second, canWriteGlobalSettings, onSetAnimationScale)
+        AnimationScaleRow(stringResource(R.string.gt_dev_anim_animator), AnimationScaleKind.ANIMATOR, animationScales.third, canWriteGlobalSettings, onSetAnimationScale)
 
-        HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         // --- Process limit and discard activities ---
         DevSwitchRow(
-            label = "Keep fewer apps in memory",
+            label = stringResource(R.string.gt_dev_keep_title),
             checked = backgroundProcessLimit,
             enabled = hasPrivilege,
             onCheckedChange = onToggleBackgroundLimit,
             explanation = listOf(
-                "Normally your phone keeps lots of apps sitting in memory so they reopen quickly. This " +
-                    "asks it to keep only one, which leaves more memory free for your game.",
-                "The cost: other apps have to start from scratch when you go back to them."
+                stringResource(R.string.gt_dev_keep_1),
+                stringResource(R.string.gt_dev_keep_2)
             )
         )
 
-        HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         DevSwitchRow(
-            label = "Close apps as soon as you leave",
+            label = stringResource(R.string.gt_dev_close_title),
             checked = alwaysFinishActivities,
             enabled = hasPrivilege,
             onCheckedChange = onToggleAlwaysFinish,
             explanation = listOf(
-                "The stronger version of the setting above. The moment you leave an app's screen, your " +
-                    "phone throws it away instead of holding on to it. That frees up the most memory.",
-                "The cost: apps you go back to start over from the beginning, and you lose whatever " +
-                    "you had on screen. Good before a big game, worth turning off after."
+                stringResource(R.string.gt_dev_close_1),
+                stringResource(R.string.gt_dev_close_2)
             )
         )
 
-        HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         DevOptionSwitchRow(
-            label = "Show refresh rate",
+            label = stringResource(R.string.gt_dev_show_rr),
             state = gameDevOptions.showRefreshRate,
             onCheckedChange = onSetShowRefreshRate,
             onOpenDeveloperOptions = onOpenDeveloperOptions,
             explanation = listOf(
-                "Puts a small number in the corner of your screen showing how many times per second " +
-                    "the screen is redrawing. Handy for checking your phone really is running at its " +
-                    "fastest.",
-                "Android guards this one closely, and newer versions guard it harder: from Android 14 " +
-                    "only root gets through, because Shizuku runs commands as \"shell\" and that is no " +
-                    "longer allowed near it. Whenever this app cannot do it, the button below opens " +
-                    "Android's own screen, where it always works — look for \"Show refresh rate\"."
+                stringResource(R.string.gt_dev_show_rr_1),
+                stringResource(R.string.gt_dev_show_rr_2)
             )
         )
 
-        HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         DevOptionSwitchRow(
-            label = "Always use the fastest screen speed",
+            label = stringResource(R.string.gt_dev_peak),
             state = gameDevOptions.forcePeakRefreshRate,
             onCheckedChange = onSetForcePeakRefreshRate,
             onOpenDeveloperOptions = onOpenDeveloperOptions,
             explanation = listOf(
-                "Phones slow the screen down to save battery when nothing much is moving. This stops " +
-                    "that, so the screen always runs at its fastest and feels smoother.",
-                "The cost: it uses more battery while it is on. Turning it off puts back whatever " +
-                    "your phone had before."
+                stringResource(R.string.gt_dev_peak_1),
+                stringResource(R.string.gt_dev_peak_2)
             )
         )
 
-        HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         DevOptionSwitchRow(
-            label = "Let games run at full speed",
+            label = stringResource(R.string.gt_dev_game_speed),
             state = gameDevOptions.gameDefaultFrameRateDisabled,
             onCheckedChange = onSetGameDefaultFrameRateDisabled,
             onOpenDeveloperOptions = onOpenDeveloperOptions,
             explanation = listOf(
-                "Android puts a speed limit on games to save battery. This removes it, so a game can " +
-                    "use your screen's full speed.",
-                "It only affects games you open afterwards. A game already running keeps the old limit " +
-                    "until you restart it — that part is Android's doing, not something this app can " +
-                    "change."
+                stringResource(R.string.gt_dev_game_speed_1),
+                stringResource(R.string.gt_dev_game_speed_2)
             )
         )
 
-        HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         // Always offered, not only when a switch has failed: several of these live on Android's own
         // Developer options screen, and a user who wants to check or change one directly should not
         // have to hunt for it.
-        OutlinedButton(onClick = onOpenDeveloperOptions, modifier = Modifier.fillMaxWidth()) {
-            Text("Open Android's developer settings")
+        CatsmokerOutlinedButton(onClick = onOpenDeveloperOptions, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.gt_dev_open_developer))
         }
     }
 }
@@ -1625,20 +1792,20 @@ private fun DevSwitchRow(
                     label,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (enabled) Color.White else Color.Gray
+                    color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    if (checked) "On" else "Off",
+                    if (checked) stringResource(R.string.gt_dev_on) else stringResource(R.string.gt_dev_off),
                     fontSize = 11.sp,
-                    color = if (checked) MaterialTheme.colorScheme.primary else Color.Gray
+                    color = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
         }
         if (!enabled) {
-            RequirementNotice("Needs root or Shizuku. Android does not let a normal app change this.")
+            RequirementNotice(stringResource(R.string.gt_needs_root_shizuku_change))
         }
-        ExplainerBox(title = "What is this?", lines = explanation)
+        ExplainerBox(title = stringResource(R.string.gt_explainer_what), lines = explanation)
     }
 }
 
@@ -1670,20 +1837,20 @@ private fun DevOptionSwitchRow(
                     label,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (switchEnabled) Color.White else Color.Gray
+                    color = if (switchEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
                     when {
-                        state.enabled == null && !state.available -> "Not available on this phone"
-                        state.enabled == null -> "Not sure — your phone would not say"
-                        state.enabled == true -> "On"
-                        else -> "Off"
+                        state.enabled == null && !state.available -> stringResource(R.string.gt_dev_na)
+                        state.enabled == null -> stringResource(R.string.gt_dev_unknown)
+                        state.enabled == true -> stringResource(R.string.gt_dev_on)
+                        else -> stringResource(R.string.gt_dev_off)
                     },
                     fontSize = 11.sp,
                     color = when {
                         state.enabled == null -> Color(0xFFFFB74D)
                         state.enabled == true -> MaterialTheme.colorScheme.primary
-                        else -> Color.Gray
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
                 )
             }
@@ -1695,23 +1862,23 @@ private fun DevOptionSwitchRow(
             )
         }
         state.detail?.takeIf { it.isNotBlank() }?.let {
-            Text(it, fontSize = 11.sp, color = Color.Gray)
+            Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         state.unavailableReason?.let {
             Text(it, fontSize = 11.sp, color = Color(0xFFFFB74D), lineHeight = 15.sp)
         }
         if (state.openDeveloperOptions) {
-            OutlinedButton(onClick = onOpenDeveloperOptions, modifier = Modifier.fillMaxWidth()) {
-                Text("Turn it on in Android settings")
+            CatsmokerOutlinedButton(onClick = onOpenDeveloperOptions, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.gt_dev_open_android))
             }
         }
         if (state.available && state.enabled == null) {
             Text(
-                "Your phone would not tell us if this is on or off, so it is being left alone.",
+                stringResource(R.string.gt_dev_unknown_long),
                 fontSize = 11.sp, color = Color(0xFFFFB74D)
             )
         }
-        ExplainerBox(title = "What is this?", lines = explanation)
+        ExplainerBox(title = stringResource(R.string.gt_explainer_what), lines = explanation)
     }
 }
 
@@ -1741,52 +1908,54 @@ fun DnsContent(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Applying…", fontSize = 12.sp, color = Color.Gray)
+                Text(stringResource(R.string.gt_dns_applying), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
         when {
-            status == null -> Text("Checking what your phone is using…", fontSize = 12.sp, color = Color.Gray)
+            status == null -> Text(stringResource(R.string.gt_dns_checking), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             !status.supported -> Text(
-                status.unsupportedReason ?: "Your phone does not have this setting",
+                status.unsupportedReason ?: stringResource(R.string.gt_dns_unsupported_generic),
                 fontSize = 12.sp, color = Color(0xFFEF9A9A)
             )
             else -> {
                 Text(
-                    "Now using: ${status.mode?.label ?: status.rawMode ?: "could not be read"}",
+                    stringResource(
+                        R.string.gt_dns_now_using,
+                        status.mode?.let { dnsModeLabel(it) }
+                            ?: status.rawMode
+                            ?: stringResource(R.string.gt_dns_could_not_read)
+                    ),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     color = if (status.mode == null) Color(0xFFFFB74D) else MaterialTheme.colorScheme.primary
                 )
                 status.hostname?.let {
-                    Text("Set to: $it", fontSize = 11.sp, color = Color.Gray)
+                    Text(stringResource(R.string.gt_dns_set_to, it), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 // The one line that proves anything happened. If it does not change after applying a
                 // provider, the change did not take, whatever the toast said.
                 Text(
                     if (status.activeServers.isEmpty()) {
-                        "Your phone did not report which one it is using"
+                        stringResource(R.string.gt_dns_no_servers)
                     } else {
-                        "Really in use right now: ${status.activeServers.joinToString()}"
+                        stringResource(R.string.gt_dns_in_use, status.activeServers.joinToString())
                     },
                     fontSize = 11.sp,
-                    color = if (status.activeServers.isEmpty()) Color(0xFFFFB74D) else Color.LightGray
+                    color = if (status.activeServers.isEmpty()) Color(0xFFFFB74D) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                 )
                 status.validatedPrivateDns?.let {
-                    Text("Scrambled and confirmed with: $it", fontSize = 11.sp, color = Color(0xFF81C784))
+                    Text(stringResource(R.string.gt_dns_validated, it), fontSize = 11.sp, color = Color(0xFF81C784))
                 }
                 if (status.vpnActive) {
                     Text(
-                        "A VPN is on. While it is on, the VPN chooses this instead, so changes here " +
-                            "will not do anything until you turn it off.",
+                        stringResource(R.string.gt_dns_vpn_note),
                         fontSize = 11.sp, color = Color(0xFFFFB74D)
                     )
                 }
                 if (!status.canWrite) {
                     RequirementNotice(
-                        "Needs root or Shizuku. Android does not let a normal app change this. " +
-                            "You can still change it yourself in Settings → Network & internet → " +
-                            "Private DNS."
+                        stringResource(R.string.gt_dns_need)
                     )
                 }
 
@@ -1811,59 +1980,81 @@ fun DnsContent(
                         selected = status.mode == DnsFeature.Mode.AUTOMATIC,
                         onClick = onSetAutomatic,
                         enabled = writable,
-                        label = { Text("Automatic", fontSize = 12.sp) }
+                        label = { Text(stringResource(R.string.gt_dns_auto), fontSize = 12.sp) }
                     )
                     FilterChip(
                         selected = status.mode == DnsFeature.Mode.OFF,
                         onClick = onDisable,
                         enabled = writable,
-                        label = { Text("Off", fontSize = 12.sp) }
+                        label = { Text(stringResource(R.string.gt_dns_off), fontSize = 12.sp) }
                     )
                 }
 
                 val selected = DnsFeature.PROVIDERS.firstOrNull { it.hostname == status.hostname }
                 if (selected != null && status.mode == DnsFeature.Mode.PROVIDER) {
                     ExplainerBox(
-                        title = "About ${selected.label}",
+                        title = stringResource(R.string.gt_dns_about, selected.label),
                         lines = listOf(
-                            selected.note,
-                            "Its addresses are ${selected.addresses.joinToString()}. If you see those " +
-                                "on the \"really in use\" line above, the change worked."
+                            dnsProviderNote(selected),
+                            stringResource(
+                                R.string.gt_dns_about_proof,
+                                selected.addresses.joinToString()
+                            )
                         )
                     )
                 }
             }
         }
 
-        HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         ExplainerBox(
-            title = "What is this?",
+            title = stringResource(R.string.gt_explainer_what),
             lines = listOf(
-                "When your phone opens a website or a game server, it first has to look up its address, " +
-                    "a bit like looking up a name in a phone book. This picks which phone book your " +
-                    "phone uses.",
-                "The ones listed here are fast, free and private, and they scramble the lookup so the " +
-                    "Wi-Fi you are on cannot read it or send you somewhere else.",
-                "\"Automatic\" lets your phone decide. \"Off\" goes back to whatever your Wi-Fi or SIM " +
-                    "hands out."
+                stringResource(R.string.gt_dns_what_1),
+                stringResource(R.string.gt_dns_what_2),
+                stringResource(R.string.gt_dns_what_3)
             )
         )
 
         ExplainerBox(
-            title = "Will this lower my ping?",
+            title = stringResource(R.string.gt_dns_ping_title),
             accent = Color(0xFFFFB300),
             lines = listOf(
-                "No, and nothing that changes this can. Ping is how long your game's messages take " +
-                    "once it is already connected, and the phone book is not used any more by then.",
-                "What it does make faster is the waiting *before* something connects — a game " +
-                    "starting, a match being found, a page loading.",
-                "An older version of this app promised lower ping here and actually changed nothing " +
-                    "at all. This one says what it really does."
+                stringResource(R.string.gt_dns_ping_1),
+                stringResource(R.string.gt_dns_ping_2),
+                stringResource(R.string.gt_dns_ping_3)
             )
         )
     }
 }
+
+/**
+ * Localized DNS mode name. The enum itself keeps the `Settings.Global` values (never translated),
+ * so the mapping lives here at the call site inside the composable.
+ */
+@Composable
+private fun dnsModeLabel(mode: DnsFeature.Mode): String = stringResource(
+    when (mode) {
+        DnsFeature.Mode.OFF -> R.string.gt_dns_off
+        DnsFeature.Mode.AUTOMATIC -> R.string.gt_dns_auto
+        DnsFeature.Mode.PROVIDER -> R.string.gt_dns_mode_provider
+    }
+)
+
+/**
+ * Localized provider note, keyed by provider id. Hostnames, addresses and operator names stay
+ * exactly as published (Private DNS validates the certificate against the hostname).
+ */
+@Composable
+private fun dnsProviderNote(provider: DnsFeature.Provider): String = stringResource(
+    when (provider.id) {
+        "google" -> R.string.gt_dns_note_google
+        "quad9" -> R.string.gt_dns_note_quad9
+        "adguard" -> R.string.gt_dns_note_adguard
+        else -> R.string.gt_dns_note_cloudflare
+    }
+)
 
 @Composable
 fun BoostContent(level: Int, outputDevice: String?, onLevelChange: (Int) -> Unit) {
@@ -1871,7 +2062,7 @@ fun BoostContent(level: Int, outputDevice: String?, onLevelChange: (Int) -> Unit
     // write SharedPreferences dozens of times per gesture.
     var draft by remember(level) { mutableFloatStateOf(level.toFloat()) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Extra volume: ${draft.toInt()}%", color = MaterialTheme.colorScheme.primary)
+        Text(stringResource(R.string.gt_boost_extra, draft.toInt()), color = MaterialTheme.colorScheme.primary)
         Slider(
             value = draft,
             onValueChange = { draft = it },
@@ -1881,27 +2072,24 @@ fun BoostContent(level: Int, outputDevice: String?, onLevelChange: (Int) -> Unit
         // Read from the audio system, not guessed, so it names whatever is actually playing.
         if (outputDevice != null) {
             Text(
-                "Playing through: $outputDevice",
+                stringResource(R.string.gt_boost_output, outputDevice),
                 style = MaterialTheme.typography.labelSmall,
-                color = Color.Gray
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         ExplainerBox(
-            title = "What is this?",
+            title = stringResource(R.string.gt_explainer_what),
             lines = listOf(
-                "It makes sound louder than your phone's own maximum, so quiet footsteps in a game " +
-                    "are easier to hear.",
-                "It works while this app is running. Set it back to 0% to turn it off."
+                stringResource(R.string.gt_boost_what_1),
+                stringResource(R.string.gt_boost_what_2)
             )
         )
         ExplainerBox(
-            title = "Is it safe?",
+            title = stringResource(R.string.gt_boost_safe_title),
             accent = Color(0xFFFFB300),
             lines = listOf(
-                "Loud sound in headphones can hurt your ears, so start low and only turn it up as " +
-                    "much as you need.",
-                "Very high settings can also make the sound crackle, because there is only so much " +
-                    "room before it distorts."
+                stringResource(R.string.gt_boost_safe_1),
+                stringResource(R.string.gt_boost_safe_2)
             )
         )
     }
@@ -1927,7 +2115,7 @@ private fun AnimationScaleRow(
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.width(92.dp)) {
-            Text(label, fontSize = 12.sp, color = Color.White)
+            Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
             // A value another app set that is not one of the three is shown as it is, not snapped onto
             // the nearest chip — the chips would otherwise misreport what the system currently holds.
             if (ANIMATION_SCALE_VALUES.none { kotlin.math.abs(it - current) < 0.005f }) {
@@ -1940,7 +2128,7 @@ private fun AnimationScaleRow(
                     selected = kotlin.math.abs(current - value) < 0.005f,
                     onClick = { onSetScale(kind, value) },
                     enabled = canWrite,
-                    label = { Text(if (value == 0f) "Off" else formatAnimationScale(value), fontSize = 11.sp) }
+                    label = { Text(if (value == 0f) stringResource(R.string.gt_dev_anim_off) else formatAnimationScale(value), fontSize = 11.sp) }
                 )
             }
         }
@@ -1990,42 +2178,42 @@ private fun formatAnimationScale(value: Float): String =
 fun AppBoosterContent(
     state: BoosterState,
     log: List<String>,
+    history: List<BoosterRun>,
+    scheduleEnabled: Boolean,
+    scheduleIntervalHours: Int,
+    scheduleNextRunAt: Long?,
+    onScheduleEnabledChange: (Boolean) -> Unit,
+    onScheduleIntervalChange: (Int) -> Unit,
     onRun: (String, Boolean) -> Unit,
     onStop: () -> Unit
 ) {
     var force by remember { mutableStateOf(false) }
     Column {
         ExplainerBox(
-            title = "What is this?",
+            title = stringResource(R.string.gt_explainer_what),
             lines = listOf(
-                "Apps arrive in a form your phone has to translate as it runs them. This translates " +
-                    "them all now instead, so your phone does not have to stop and do it later.",
-                "In a game, that is the little stutters in the first few minutes and after each " +
-                    "loading screen. This gets them out of the way beforehand.",
-                "It does not make your game run faster once it is going. It makes it smoother at the " +
-                    "start."
+                stringResource(R.string.gt_booster_what_1),
+                stringResource(R.string.gt_booster_what_2),
+                stringResource(R.string.gt_booster_what_3)
             )
         )
         Spacer(modifier = Modifier.height(6.dp))
         ExplainerBox(
-            title = "What does it cost?",
+            title = stringResource(R.string.gt_booster_cost_title),
             accent = Color(0xFFFFB300),
             lines = listOf(
-                "Space. Translated apps take up more room on your phone than before.",
-                "Time and heat. Going through every app takes a while and warms your phone up, so " +
-                    "plug it in and leave it. You can press Stop at any point.",
-                "Nothing breaks. Your apps keep working exactly the same, and your phone redoes this " +
-                    "by itself whenever an app updates."
+                stringResource(R.string.gt_booster_cost_1),
+                stringResource(R.string.gt_booster_cost_2),
+                stringResource(R.string.gt_booster_cost_3)
             )
         )
         Spacer(modifier = Modifier.height(6.dp))
         ExplainerBox(
-            title = "Why is there only one setting?",
+            title = stringResource(R.string.gt_booster_why_title),
             lines = listOf(
-                "There used to be three. Two of them were not worth offering.",
-                "One only redid work your phone already does by itself every night while you sleep.",
-                "The other also translated parts of an app that never run, which took much longer and " +
-                    "used much more space for no gain. So the useful one is the only one left."
+                stringResource(R.string.gt_booster_why_1),
+                stringResource(R.string.gt_booster_why_2),
+                stringResource(R.string.gt_booster_why_3)
             )
         )
         Spacer(modifier = Modifier.height(8.dp))
@@ -2034,32 +2222,32 @@ fun AppBoosterContent(
         // report success having compiled nothing. Kept as the reference project's "force optimize".
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = force, onCheckedChange = { force = it }, enabled = !state.isRunning)
-            Text(stringResource(R.string.booster_force_label), fontSize = 12.sp, color = Color.Gray)
+            Text(stringResource(R.string.booster_force_label), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(modifier = Modifier.height(8.dp))
 
         if (state.isRunning) {
-            Button(
+            CatsmokerButton(
                 onClick = onStop,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
             ) { Text(stringResource(R.string.booster_stop)) }
         } else {
-            Button(onClick = { onRun("speed", force) }, modifier = Modifier.fillMaxWidth()) {
+            CatsmokerButton(onClick = { onRun("speed", force) }, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.booster_start))
             }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = boosterStatusText(state),
-            fontSize = 12.sp,
-            color = if (state.outcome is BoosterOutcome.Unavailable || state.outcome is BoosterOutcome.Failed) {
-                MaterialTheme.colorScheme.error
-            } else {
-                Color.Gray
-            }
-        )
+            Text(
+                text = boosterStatusText(state),
+                fontSize = 12.sp,
+                color = if (state.outcome is BoosterOutcome.Unavailable || state.outcome is BoosterOutcome.Failed) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            )
 
         if (state.isRunning) {
             Spacer(modifier = Modifier.height(8.dp))
@@ -2089,7 +2277,131 @@ fun AppBoosterContent(
                 }
             }
         }
+
+        // The log above dies with the app; this is every finished sweep the device actually
+        // reported, newest first, so "what did the last boost do" has an answer tomorrow too.
+        if (history.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            CollapsibleExplainer(
+                title = stringResource(R.string.gt_booster_history),
+                lines = history.asReversed().take(10).map { run -> boosterHistoryLine(run) }
+            )
+        }
+
+        // The recurring version of the same sweep, driven by WorkManager while the app is closed.
+        // Its stated limits are in the section's own explainer — rough intervals, skipped (not
+        // failed) runs without privilege, and WorkManager's estimate rather than a promised time.
+        Spacer(modifier = Modifier.height(12.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Spacer(modifier = Modifier.height(12.dp))
+        DexoptScheduleSection(
+            enabled = scheduleEnabled,
+            intervalHours = scheduleIntervalHours,
+            nextRunAt = scheduleNextRunAt,
+            onEnabledChange = onScheduleEnabledChange,
+            onIntervalChange = onScheduleIntervalChange
+        )
     }
+}
+
+/**
+ * The recurring dexopt sweep's controls. Every claim on the row is something the device or
+ * WorkManager reported: the switch state is the persisted setting *and* the enrollment, and the
+ * next-run line is WorkManager's own current estimate — "unknown" when it will not say, never a
+ * time nobody promised.
+ */
+@Composable
+private fun DexoptScheduleSection(
+    enabled: Boolean,
+    intervalHours: Int,
+    nextRunAt: Long?,
+    onEnabledChange: (Boolean) -> Unit,
+    onIntervalChange: (Int) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    stringResource(R.string.gt_booster_schedule),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    when {
+                        enabled && nextRunAt != null -> stringResource(R.string.gt_booster_next, formatScheduleTime(nextRunAt))
+                        enabled -> stringResource(R.string.gt_booster_next_unknown)
+                        else -> stringResource(R.string.gt_booster_sched_off)
+                    },
+                    fontSize = 11.sp,
+                    color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = enabled, onCheckedChange = onEnabledChange)
+        }
+
+        if (enabled) {
+            // Changing the interval retunes the schedule in place (UPDATE, not REPLACE), so the
+            // countdown is not restarted from zero on every tap.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.horizontalScroll(rememberScrollState())
+            ) {
+                DexoptScheduleStore.INTERVAL_CHOICES.forEach { hours ->
+                    FilterChip(
+                        selected = intervalHours == hours,
+                        onClick = { onIntervalChange(hours) },
+                        label = { Text(intervalLabel(hours)) }
+                    )
+                }
+            }
+        }
+
+        ExplainerBox(
+            title = stringResource(R.string.gt_booster_sched_what_title),
+            lines = listOf(
+                stringResource(R.string.gt_booster_sched_1),
+                stringResource(R.string.gt_booster_sched_2),
+                stringResource(R.string.gt_booster_sched_3),
+                stringResource(R.string.gt_booster_sched_4)
+            )
+        )
+    }
+}
+
+@Composable
+private fun intervalLabel(hours: Int): String = when (hours) {
+    24 -> stringResource(R.string.gt_booster_every_day)
+    72 -> stringResource(R.string.gt_booster_every_3)
+    168 -> stringResource(R.string.gt_booster_every_week)
+    else -> stringResource(R.string.gt_booster_every_h, hours)
+}
+
+private fun formatScheduleTime(at: Long): String =
+    java.text.SimpleDateFormat("d MMM, HH:mm", java.util.Locale.getDefault()).format(java.util.Date(at))
+
+/** One history row: when, what it achieved, how long it took, and how it ended. */
+@Composable
+private fun boosterHistoryLine(run: BoosterRun): String {
+    val when_ = java.text.SimpleDateFormat("d MMM, HH:mm", java.util.Locale.getDefault())
+        .format(java.util.Date(run.startedAt))
+    val minutes = run.durationMs / 60000
+    val seconds = (run.durationMs % 60000) / 1000
+    val duration = stringResource(R.string.gt_booster_hist_dur, minutes, seconds)
+    val tail = when (run.outcome) {
+        "cancelled" -> stringResource(R.string.gt_booster_hist_cancelled)
+        "failed" -> stringResource(R.string.gt_booster_hist_failed)
+        else -> ""
+    }
+    return stringResource(
+        R.string.gt_booster_hist,
+        when_,
+        run.optimized,
+        run.skipped,
+        run.failed,
+        duration,
+        tail
+    )
 }
 
 /** One line saying what the sweep is doing, in counts the engine measured. */
@@ -2112,12 +2424,12 @@ private fun boosterStatusText(state: BoosterState): String = when (val outcome =
 fun AppPickerDialog(apps: List<GameInfo>, onDismiss: () -> Unit, onAppSelected: (String) -> Unit) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
 
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add App") }, text = {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(stringResource(R.string.gt_picker_add_app)) }, text = {
         Column {
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                label = { Text("Search Apps") },
+                label = { Text(stringResource(R.string.gt_picker_search)) },
                 modifier = Modifier.fillMaxWidth(),
                 leadingIcon = { Icon(Icons.Default.Search, null) }
             )
@@ -2135,8 +2447,8 @@ fun AppPickerDialog(apps: List<GameInfo>, onDismiss: () -> Unit, onAppSelected: 
             if (filtered.isEmpty()) {
                 Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
                     Text(
-                        if (apps.isEmpty()) "Loading apps…" else "No apps found",
-                        color = Color.Gray,
+                        if (apps.isEmpty()) stringResource(R.string.gt_picker_loading) else stringResource(R.string.gt_picker_none),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 14.sp
                     )
                 }
@@ -2163,14 +2475,14 @@ fun AppPickerDialog(apps: List<GameInfo>, onDismiss: () -> Unit, onAppSelected: 
                             Column {
                                 Text(
                                     app.appName,
-                                    color = Color.White,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
                                     app.packageName,
                                     fontSize = 11.sp,
-                                    color = Color.Gray,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -2180,7 +2492,7 @@ fun AppPickerDialog(apps: List<GameInfo>, onDismiss: () -> Unit, onAppSelected: 
                 }
             }
         }
-    }, confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    }, confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.gt_picker_cancel)) } })
 }
 
 @Preview(showBackground = true, backgroundColor = 0xFF000000)
@@ -2198,6 +2510,7 @@ fun GamingToolsPreview() {
             isFixedPerformanceMode = false,
             boosterLog = listOf("System optimized", "Cache cleared"),
             boosterState = BoosterState(),
+            boosterHistory = emptyList(),
             animationScales = Triple(1f, 1f, 1f),
             alwaysFinishActivities = false,
             backgroundProcessLimit = false,
@@ -2211,12 +2524,18 @@ fun GamingToolsPreview() {
             onToggleDnd = {},
             onPerformMaintenance = {},
             onScanJunk = {},
+            onAddCleanerKeepEntry = {},
+            onRemoveCleanerKeepEntry = {},
+            onAddCleanerCleanPattern = {},
+            onRemoveCleanerCleanPattern = {},
             onGrantStorageAccess = {},
             onActivateGamingMode = {},
             onDeactivateGamingMode = {},
             onBoostRam = {},
             onRunBooster = { _, _ -> },
             onStopBooster = {},
+            onSetDexoptSchedule = {},
+            onSetDexoptInterval = {},
             onToggleFixedPerformance = {},
             onBoostChange = {},
             onSetAnimationScale = { _, _ -> },

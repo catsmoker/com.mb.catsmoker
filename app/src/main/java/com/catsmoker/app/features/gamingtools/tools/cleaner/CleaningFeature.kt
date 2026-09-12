@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Environment
+import com.catsmoker.app.R
 import com.catsmoker.app.system.shell.ShellRunner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -38,7 +39,20 @@ object CleaningFeature {
         /** Folders whose whole subtree holds no data. `clean_empty_folder` in the reference, also on by default. */
         EMPTY_DIRS("Empty folders"),
         LOGS("Error reports", true),
-        CORPSES("Files left by removed apps", true)
+        CORPSES("Files left by removed apps", true),
+
+        /**
+         * Loose installer packages — `.apk`, `.apks`, `.apkm`, `.aab` — found in shared storage,
+         * the reference cleaner's `filter_apkFiles` (`cleanApk`, on by default there).
+         *
+         * Deliberately *not* marked aggressive, matching the reference: an installer left behind
+         * after an install is disposable — the store re-downloads it — and `Download`, where
+         * almost all of them live, is a protected name, so the walk never claims anything the
+         * user put there on purpose unless it is inside an unprotected folder first. What this
+         * category actually reaches is installers dropped at the storage root and in app folders
+         * like `UCDownloads` (which the built-in blacklist already claims wholesale).
+         */
+        INSTALLERS("Old installer files")
     }
 
     /**
@@ -111,6 +125,19 @@ object CleaningFeature {
     ) {
         /** True when nothing at all was removed — distinct from "removed things that were empty". */
         val removedNothing: Boolean get() = deletedItems == 0
+    }
+
+    /** Localized bucket label. The enum keeps plain words (no Context), so mapping lives here. */
+    @androidx.annotation.StringRes
+    internal fun categoryStringRes(category: Category): Int = when (category) {
+        Category.CACHE -> R.string.gt_cat_cache
+        Category.TEMP -> R.string.gt_cat_temp
+        Category.THUMBNAILS -> R.string.gt_cat_thumbs
+        Category.EMPTY_FILES -> R.string.gt_cat_empty_files
+        Category.EMPTY_DIRS -> R.string.gt_cat_empty_dirs
+        Category.LOGS -> R.string.gt_cat_logs
+        Category.CORPSES -> R.string.gt_cat_corpses
+        Category.INSTALLERS -> R.string.gt_cat_installers
     }
 
     /** Guard rails so a pathological tree cannot hang the scan or blow the stack. */
@@ -259,7 +286,12 @@ object CleaningFeature {
      *   because package-visibility filtering makes `getInstalledApplications` under-report installed
      *   apps and healthy `Android/data` directories would be misread as leftovers.
      */
-    suspend fun scan(context: Context, shellRunner: ShellRunner): ScanReport =
+    suspend fun scan(
+        context: Context,
+        shellRunner: ShellRunner,
+        userKeepEntries: Set<String> = emptySet(),
+        userCleanPatterns: Set<String> = emptySet()
+    ): ScanReport =
         withContext(Dispatchers.IO) {
             val root = Environment.getExternalStorageDirectory()
             val rootPath = root.absolutePath
@@ -268,39 +300,40 @@ object CleaningFeature {
             val directAccess = hasStorageAccess(context)
             val privileged = shellRunner.hasPrivilege()
 
+            // Compiled once per scan; invalid patterns were already rejected at write time, and
+            // an invalid one that arrived some other way is skipped by the compiler.
+            val userClean = CleanerPatternMatcher.compileBlacklist(userCleanPatterns)
+
             // A granted permission is not proof the volume is readable, so the listing itself is
             // the test. null here is precisely the case that used to empty every bucket silently.
             val rootListing = if (directAccess) root.listFiles() else null
 
             if (!directAccess) {
                 limitations += if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    "This app is not allowed to see all your files, so your main storage was skipped."
+                    context.getString(R.string.gt_scan_lim_files)
                 } else {
-                    "This app does not have storage permission, so your main storage was skipped."
+                    context.getString(R.string.gt_scan_lim_perm)
                 }
             } else if (rootListing == null) {
-                limitations += "Your storage could not be opened, even though this app is allowed to. " +
-                    "It may not be mounted right now."
+                limitations += context.getString(R.string.gt_scan_lim_mount)
             }
             if (!privileged) {
-                limitations += "Without root or Shizuku, the folders where apps keep their own files " +
-                    "are closed to this app on Android 11 and newer, so those were not checked."
+                limitations += context.getString(R.string.gt_scan_lim_priv)
             }
 
             val installedPackages = resolveInstalledPackages(context, shellRunner)
             if (installedPackages == null) {
-                limitations += "Your list of installed apps could not be read, so leftovers from " +
-                    "removed apps were not looked for — guessing could delete files an app still needs."
+                limitations += context.getString(R.string.gt_scan_lim_pkgs)
             }
 
             val buckets = Buckets()
 
             if (rootListing != null) {
-                walkSharedStorage(rootPath, installedPackages, buckets)
+                walkSharedStorage(rootPath, installedPackages, userKeepEntries, userClean, buckets)
             }
 
             val scannedAppData = if (privileged) {
-                scanAppDataViaShell(shellRunner, rootPath, installedPackages, buckets, limitations)
+                scanAppDataViaShell(context, shellRunner, rootPath, installedPackages, buckets, limitations)
             } else {
                 false
             }
@@ -308,9 +341,11 @@ object CleaningFeature {
             // A capped bucket is still a partial answer, so say so rather than presenting the first
             // 2000 paths as the whole picture.
             for (category in buckets.truncated) {
-                limitations += "${category.label}: more than $MAX_PATHS_PER_CATEGORY were found and " +
-                    "only the first $MAX_PATHS_PER_CATEGORY are listed. Scan again after cleaning " +
-                    "to pick up the rest."
+                limitations += context.getString(
+                    R.string.gt_scan_lim_truncated,
+                    context.getString(categoryStringRes(category)),
+                    MAX_PATHS_PER_CATEGORY
+                )
             }
 
             ScanReport(
@@ -357,6 +392,8 @@ object CleaningFeature {
     private suspend fun walkSharedStorage(
         rootPath: String,
         installedPackages: Set<String>?,
+        userKeep: Set<String>,
+        userClean: List<Regex>,
         buckets: Buckets
     ) {
         // Insertion order is pre-order, so a parent is always recorded before its children. Phase
@@ -392,10 +429,14 @@ object CleaningFeature {
                 val childProtected = isProtected(child)
 
                 if (child.isDirectory) {
+                    // A protected name is never claimed, so a keep entry has nothing to save it
+                    // from; a user clean rule on a protected directory is refused the same way —
+                    // the walk never re-opens DCIM or Download to deletion, however the rules are
+                    // written. Unprotected directories get the full classification below.
                     val category = if (childProtected) {
                         null
                     } else {
-                        classifyDirectory(child, rootPath, installedPackages)
+                        classifyDirectory(child, rootPath, installedPackages, userKeep, userClean)
                     }
                     if (category != null) {
                         // Claim the whole directory and stop: descending would double-count its
@@ -412,6 +453,20 @@ object CleaningFeature {
                     node.childDirs += child.absolutePath
                     stack.addLast(child.absolutePath)
                 } else when {
+                    // User keep rules are judged before anything else, so an entry here overrides
+                    // even the built-in blacklist — the whitelist is the user's "no, this one"
+                    // answer, exactly the precedence the reference gives it by skipping
+                    // whitelisted files at listing time.
+                    CleanerPatternMatcher.isWhitelisted(child.absolutePath, child.name, userKeep) ->
+                        node.hasContent = true
+                    // A user clean pattern is judged before the built-in rules: the user named
+                    // this path for removal, so it is claimed under LOGS (the built-in
+                    // delete-by-rule bucket) whatever it looks like. Protected files never reach
+                    // here, so the guard below stands above user rules, not below them.
+                    CleanerPatternMatcher.matchesBlacklist(child.absolutePath, userClean) -> {
+                        buckets.add(Category.LOGS, child.absolutePath, child.length())
+                        node.hasContent = true
+                    }
                     // A name the user marked as theirs is left alone whatever its size, and it is
                     // left alone here rather than at delete time so the list the user reviews is
                     // exactly the list that gets removed. It also stops the enclosing folder from
@@ -419,6 +474,11 @@ object CleaningFeature {
                     childProtected -> node.hasContent = true
                     matchesBlacklist(child.absolutePath, rootPath) -> {
                         buckets.add(Category.LOGS, child.absolutePath, child.length())
+                        node.hasContent = true
+                    }
+                    // Loose installer packages, the reference cleaner's `filter_apkFiles`.
+                    CleanerPatternMatcher.isInstallerFile(child.name) -> {
+                        buckets.add(Category.INSTALLERS, child.absolutePath, child.length())
                         node.hasContent = true
                     }
                     // Zero bytes: junk by the reference cleaner's `isFileEmpty` rule, whether or not
@@ -477,6 +537,7 @@ object CleaningFeature {
      * @return true when the directory was reachable and therefore actually scanned.
      */
     private suspend fun scanAppDataViaShell(
+        context: Context,
         shellRunner: ShellRunner,
         rootPath: String,
         installedPackages: Set<String>?,
@@ -485,7 +546,7 @@ object CleaningFeature {
     ): Boolean {
         val dataDir = "$rootPath/Android/data"
         if (!shellRunner.execSafeResult("test", "-d", dataDir).isSuccess) {
-            limitations += "$dataDir is not present, so app caches there were not scanned."
+            limitations += context.getString(R.string.gt_scan_lim_no_datadir, dataDir)
             return false
         }
 
@@ -613,13 +674,25 @@ object CleaningFeature {
     private fun classifyDirectory(
         dir: File,
         rootPath: String,
-        installedPackages: Set<String>?
+        installedPackages: Set<String>?,
+        userKeep: Set<String>,
+        userClean: List<Regex>
     ): Category? = when {
+        // A user keep entry overrides every rule below it — the whitelist is judged first, the
+        // same order the reference applies (whitelist at listing time, filters after).
+        CleanerPatternMatcher.isWhitelisted(dir.absolutePath, dir.name, userKeep) -> null
+        // A user clean rule claims the directory wholesale, before the built-in rules get a say.
+        // Protected names never reach here (the walk gates them), so Download or DCIM cannot be
+        // aimed at — the built-in guard stands above user rules, not below them.
+        CleanerPatternMatcher.matchesBlacklist(dir.absolutePath, userClean) -> Category.LOGS
         dir.name.equals("cache", ignoreCase = true) -> Category.CACHE
         dir.name.equals("thumbnails", ignoreCase = true) ||
             dir.name.equals(".thumbnails", ignoreCase = true) -> Category.THUMBNAILS
         dir.name.equals("temp", ignoreCase = true) ||
-            dir.name.equals("tmp", ignoreCase = true) -> Category.TEMP
+            dir.name.equals("tmp", ignoreCase = true) ||
+            // The reference's filter_genericFolders carries the other two spellings ("Temporary",
+            // "temporary"); matching case-insensitively reaches the same set in one test.
+            dir.name.equals("temporary", ignoreCase = true) -> Category.TEMP
         installedPackages != null && isCorpse(dir, installedPackages) -> Category.CORPSES
         matchesBlacklist(dir.absolutePath, rootPath) -> Category.LOGS
         // Emptiness is deliberately not decided here: it depends on the whole subtree, which the

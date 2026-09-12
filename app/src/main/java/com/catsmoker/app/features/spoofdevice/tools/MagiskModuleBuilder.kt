@@ -48,6 +48,14 @@ import java.util.zip.ZipOutputStream
  * `referance/`** — it was removed mid-2026-08 and the folder is not under version control, so the
  * citation is unverifiable now. The branch stands on its own: it only tests two paths for existence
  * and sources neither, so nothing about it depends on a layout that tree would have confirmed.
+ *
+ * The multiple-root-manager refusal in [customizeSh] is cross-checked against a fifth,
+ * `spoofdevice/COPG-JSON/module/customize.sh`'s `check_zygisk()`: the same three managers, counted
+ * with `command -v` on each one's daemon, and the same refuse-when-more-than-one rule. Two of its
+ * branches are deliberately not ported. Its `exit 1` abort — this script is *sourced* by
+ * `install_module`, so the refusal neutralizes the module instead of killing the installer — and
+ * its Zygisk-activity gating, which protects the native injection that module ships and this one
+ * does not.
  */
 object MagiskModuleBuilder {
 
@@ -67,6 +75,22 @@ object MagiskModuleBuilder {
 
     /** Where [serviceSh] leaves its per-boot reading, beside the module it describes. */
     const val VERIFY_LOG_NAME = "verify.log"
+
+    /**
+     * The one binary member a module can carry: this app's own APK, which [serviceSh] installs once
+     * after boot when the app is absent. Named without a `com.catsmoker.app` prefix because it sits
+     * beside `system.prop` and `verify.log` in the module directory, where the other names are
+     * human-facing too.
+     */
+    const val COMPANION_APK_NAME = "CatSmoker.apk"
+
+    /**
+     * This app's own package, spelled out rather than read from `BuildConfig` so this object stays
+     * free of build-generated classes — it is pure JVM and unit-tested as such. [serviceSh] uses it
+     * to detect a present companion app; if the application id ever changes, this must change with
+     * it or the module would reinstall over every boot's "already present" check.
+     */
+    const val APPLICATION_ID = "com.catsmoker.app"
 
     /**
      * The only device-identity keys a generated `system.prop` carries — and the whole of the spoof
@@ -144,13 +168,19 @@ object MagiskModuleBuilder {
      * @param spoofedModel the profile's `ro.product.model`, used in the installer banner and the
      *   module description — and as the fallback source of the model itself when [systemProperties]
      *   carries no `ro.product.model`.
+     * @param companionApk this app's own APK, optionally bundled so the module can restore it after
+     *   the app is gone. Flashed as one binary ZIP member ([COMPANION_APK_NAME]) and installed once
+     *   by [serviceSh] after boot, only when this package is absent, then deleted — one-shot
+     *   delivery, not a boot-loop reinstall. Null omits the member. Being a `ByteArray` in a data
+     *   class, it compares by identity; nothing compares specs for equality.
      */
     data class ModuleSpec(
         val systemProperties: Map<String, String>,
         val versionName: String,
         val versionCode: Int,
         val profileName: String,
-        val spoofedModel: String
+        val spoofedModel: String,
+        val companionApk: ByteArray? = null
     )
 
     /**
@@ -166,7 +196,10 @@ object MagiskModuleBuilder {
             "module.prop" to moduleProp(spec),
             "system.prop" to systemProp(spec),
             "customize.sh" to customizeSh(spec),
-            "service.sh" to serviceSh(spec)
+            "service.sh" to serviceSh(spec),
+            "action.sh" to actionSh(),
+            "webroot/index.html" to webIndexHtml(),
+            "webroot/cgi-bin/api.sh" to webApiSh()
         )
         // Not closed here: closing a ZipOutputStream closes the stream under it, and on the
         // MediaStore path that stream belongs to the caller's `use` block.
@@ -176,8 +209,17 @@ object MagiskModuleBuilder {
             zip.write(body.toByteArray(Charsets.UTF_8))
             zip.closeEntry()
         }
+        // The one binary member: written raw, not through the UTF-8 loop above, which would
+        // corrupt bytes that are not valid UTF-8 — and an APK is full of them.
+        if (spec.companionApk != null) {
+            zip.putNextEntry(ZipEntry(COMPANION_APK_NAME))
+            zip.write(spec.companionApk)
+            zip.closeEntry()
+        }
         zip.finish()
-        return entries.keys.toList()
+        return entries.keys.toList() + listOfNotNull(
+            spec.companionApk?.let { COMPANION_APK_NAME }
+        )
     }
 
     /**
@@ -306,7 +348,7 @@ object MagiskModuleBuilder {
      * The installer banner. Sourced by `install_module` when present, so it is the only place the
      * flashing user sees which profile they are about to apply.
      *
-     * Three things it now does beyond printing:
+     * Four things it now does beyond printing:
      *
      * - Prints the device's real `ro.product.model` beside the spoofed one, as
      *   `Unlocker-p4/customize.sh` does. The value being replaced is the half of the swap the
@@ -322,6 +364,19 @@ object MagiskModuleBuilder {
      *   short [MODEL_KEYS]: a user who set a fingerprint or a locale in the profile would otherwise
      *   read a five-property module as a broken one. It also prints [KEY_PIXELPROPS_GAME] and its
      *   value, since that is the one key here that is not the model.
+     * - Refuses to activate when more than one root manager is present. Magisk, KernelSU and APatch
+     *   each load their own modules at boot while `resetprop` applies this module's `system.prop`
+     *   device-wide, and with two managers racing, whose copy survives is not predictable — the
+     *   same last-one-wins hazard the conflict scan names between modules, one level up. The
+     *   refusal cannot `exit` (same reason as every other branch), so it removes `system.prop`
+     *   instead: nothing is ever handed to `resetprop`, `service.sh` exits before it can rewrite
+     *   the description, and `module.prop` is rewritten to say the module is not active and why —
+     *   leaving an inert module the user can read and remove rather than a half-installed one.
+     *   Cross-checked against `spoofdevice/COPG-JSON/module/customize.sh`'s `check_zygisk()`,
+     *   which counts the same three managers and refuses on a count above one. Its zero-manager
+     *   abort and Zygisk-activity checks are not ported: they gate the native injection that
+     *   module ships and this one does not — `customize.sh` only ever runs inside a manager's
+     *   installer, and this module needs no Zygisk at all.
      *
      * Nothing here calls `exit`: the script is *sourced* by `install_module`, so an `exit` would
      * take the whole installer down. Every branch is a guard.
@@ -344,6 +399,47 @@ object MagiskModuleBuilder {
             add("ui_print \"Pixel flag:  $KEY_PIXELPROPS_GAME=${isPixelTarget(spec)}\"")
             add("ui_print \"---------------------------------\"")
             add("")
+
+            // One root manager must own this device before this module writes device-wide
+            // properties at every boot. The probes come from COPG-JSON's check_zygisk()
+            // (command -v on each manager's daemon) plus the /data/adb trees update-binary
+            // already tests, so a manager counts whether its binary is on PATH or only its
+            // install tree survives.
+            add("ROOTS=\"\"")
+            add("ROOT_COUNT=0")
+            add("if command -v magisk >/dev/null 2>&1 || [ -d \"\${NVBASE:-/data/adb}/magisk\" ]; then")
+            add("  ROOTS=\"\$ROOTS Magisk\"")
+            add("  ROOT_COUNT=\$((ROOT_COUNT + 1))")
+            add("fi")
+            add("if command -v ksud >/dev/null 2>&1 || [ -d \"\${NVBASE:-/data/adb}/ksu\" ]; then")
+            add("  ROOTS=\"\$ROOTS KernelSU\"")
+            add("  ROOT_COUNT=\$((ROOT_COUNT + 1))")
+            add("fi")
+            add("if command -v apd >/dev/null 2>&1 || [ -d \"\${NVBASE:-/data/adb}/ap\" ]; then")
+            add("  ROOTS=\"\$ROOTS APatch\"")
+            add("  ROOT_COUNT=\$((ROOT_COUNT + 1))")
+            add("fi")
+            add("")
+            add("if [ \"\$ROOT_COUNT\" -gt 1 ]; then")
+            add("  ui_print \"! Refusing to activate this module.\"")
+            add("  ui_print \"! \$ROOT_COUNT root managers detected:\$ROOTS.\"")
+            add("  ui_print \"! Each loads its own modules at boot while this one\"")
+            add("  ui_print \"! writes device-wide properties -- whose copy wins is\"")
+            add("  ui_print \"! not predictable. Keep one manager, then re-flash.\"")
+            add("  ui_print \"---------------------------------\"")
+            add("  # No exit -- install_module *sources* this script, so an exit would take the")
+            add("  # whole installer down mid-flight. The refusal removes what the module would")
+            add("  # do instead: without system.prop nothing is ever handed to resetprop, and")
+            add("  # service.sh exits before it can rewrite the description, so what module.prop")
+            add("  # says now is what the module list keeps saying until the user re-flashes.")
+            add("  rm -f \"\$MODPATH/system.prop\"")
+            add("  {")
+            add("    cat <<'$MODULE_PROP_HEREDOC'")
+            addAll(identityLines(spec))
+            add(MODULE_PROP_HEREDOC)
+            add("    echo \"description=NOT ACTIVE -- install refused, \$ROOT_COUNT root managers detected. Keep one, then re-flash.\"")
+            add("  } > \"\$MODPATH/module.prop\"")
+            add("else")
 
             if (omitted.isNotEmpty()) {
                 add("# Stated while the user can still abort, and while it can still be explained")
@@ -396,6 +492,8 @@ object MagiskModuleBuilder {
             add("ui_print \"          Happy gaming!          \"")
             add("ui_print \"---------------------------------\"")
             add("")
+            add("fi")
+            add("")
         }
     )
 
@@ -421,6 +519,14 @@ object MagiskModuleBuilder {
      *   created it, a differing one means something on the device won. Those need different fixes,
      *   which is the same reason `GamingModeReport` uses nullable fields.
      * - The log is truncated, never appended: it describes the boot the user is in.
+     * - A bundled companion APK ([ModuleSpec.companionApk]) is installed *after* the report is
+     *   written, so `pm install` — which can take seconds — never delays the verification. The
+     *   mechanism is `GameUnlocker-main/common/service.sh`'s: install the APK sitting beside the
+     *   module with `pm install -g`, then delete it, making delivery one-shot rather than a
+     *   reinstall at every boot. One divergence, stated: ours first checks whether the app is
+     *   already installed and discards the APK as "already present" instead of running the install
+     *   — same version would churn a pointless reinstall, older version would fail as a downgrade,
+     *   and neither belongs in a log the user reads to learn what the device did.
      */
     private fun serviceSh(spec: ModuleSpec): String = lf(
         buildList {
@@ -453,9 +559,15 @@ object MagiskModuleBuilder {
             add("MISSING=0")
             add("CHANGED=0")
             add("")
+            // The model this report names comes from system.prop itself, not from a value baked
+            // in at export time: the module's WebUI can rewrite the model in place between
+            // flashes, and a baked string would keep naming the model the ZIP shipped with.
+            add("MODEL=\$(sed -n 's/^ro\\.product\\.model=//p' \"\$PROP\" | head -n 1)")
+            add("[ -z \"\$MODEL\" ] && MODEL=\"(no model)\"")
+            add("")
             add("echo \"# CatSmoker spoof verification\" > \"\$LOG\"")
             add("echo \"# profile: ${shellSafe(spec.profileName)}\" >> \"\$LOG\"")
-            add("echo \"# spoofed as: ${shellSafe(spec.spoofedModel)}\" >> \"\$LOG\"")
+            add("echo \"# spoofed as: \$MODEL\" >> \"\$LOG\"")
             add("echo \"# module: $MODULE_ID ${singleLine(spec.versionName)} (${spec.versionCode})\" >> \"\$LOG\"")
             add("echo \"# read back: \$(date 2>/dev/null)\" >> \"\$LOG\"")
             add("if [ \"\$BOOTED\" != \"1\" ]; then")
@@ -497,7 +609,7 @@ object MagiskModuleBuilder {
             add("if [ \"\$CHANGED\" -gt 0 ]; then")
             add("  DESC=\"\$DESC, \$CHANGED overwritten by the device\"")
             add("fi")
-            add("DESC=\"\$DESC - spoofing as ${shellSafe(spec.spoofedModel)}. Details in $VERIFY_LOG_NAME.\"")
+            add("DESC=\"\$DESC - spoofing as \$MODEL. Details in $VERIFY_LOG_NAME.\"")
             add("")
             add("# Rewritten whole rather than sed'd in place: property values carry slashes and")
             add("# ampersands that a sed replacement would eat.")
@@ -508,8 +620,381 @@ object MagiskModuleBuilder {
             add("  echo \"description=\$DESC\"")
             add("} > \"\$MODDIR/module.prop.new\" && mv -f \"\$MODDIR/module.prop.new\" \"\$MODDIR/module.prop\"")
             add("")
+            // Companion-app recovery, last so the report never waits on pm install. One-shot, as
+            // in the reference: the APK is discarded after the first boot that sees it.
+            add("APK=\"\$MODDIR/$COMPANION_APK_NAME\"")
+            add("if [ -f \"\$APK\" ]; then")
+            add("    if pm list packages $APPLICATION_ID 2>/dev/null | grep -q $APPLICATION_ID; then")
+            add("        echo \"companion app already present - bundled APK discarded\" >> \"\$LOG\"")
+            add("    elif pm install -g \"\$APK\" >/dev/null 2>&1; then")
+            add("        echo \"companion app installed from the module (permissions granted)\" >> \"\$LOG\"")
+            add("    else")
+            add("        # Failed is reported as failed, and the APK is still discarded: delivery")
+            add("        # stays one-shot rather than retrying into every boot log.")
+            add("        echo \"companion app install refused by pm - APK discarded\" >> \"\$LOG\"")
+            add("    fi")
+            add("    rm -f \"\$APK\"")
+            add("fi")
+            add("")
         }
     )
+
+    /**
+     * The root manager's action button: start a WebUI for this module without opening the app.
+     *
+     * Ported from `spoofdevice/GameUnlocker-main/common/action.sh`, read in full, with its shape
+     * kept deliberately:
+     *
+     * - busybox-httpd is found through the four candidate paths the reference probes (KSU, Magisk,
+     *   APatch, then `PATH`), each actually executed once before it is trusted — a busybox that
+     *   exists but cannot run is the failure the probe exists to catch.
+     * - The port is random in 6000–9999 from `/dev/urandom` (epoch fallback when no character
+     *   device), and the server binds `127.0.0.1` only, so nothing off-device can reach it.
+     * - A fresh 16-byte hex auth token is written beside the module at `0600` and appended to the
+     *   URL the browser opens; [webApiSh] enforces it.
+     * - The server kills itself after 300 s and removes the token with it, so neither the port nor
+     *   the credential outlives the session the button started.
+     * - The KSUWebUI app, when installed, gets the page launched natively instead — its sandbox is
+     *   the one case [webApiSh]'s token check may be skipped for.
+     *
+     * Divergences, stated: the reference's terminal banner prints the module's own name; and its
+     * trailing message tells the user the WebUI is open without mentioning that it also closes
+     * itself — ours names the five-minute lifetime, because a server that silently stops answering
+     * reads as broken otherwise.
+     */
+    private fun actionSh(): String = lf(
+        buildList {
+            add("#!/sbin/sh")
+            add("")
+            add("MODDIR=\${0%/*}")
+            add("")
+            add("echo \"==========================================\"")
+            add("echo \"    CatSmoker Spoof Manager (WebUI)      \"")
+            add("echo \"==========================================\"")
+            add("echo \"Starting WebUI configuration...\"")
+            add("")
+            add("# Busybox is probed, not assumed: each candidate is executed once before it is")
+            add("# trusted, so a busybox that exists but cannot run is refused here rather than")
+            add("# half-way through serving a page.")
+            add("find_busybox() {")
+            add("    for candidate in /data/adb/ksu/bin/busybox /data/adb/magisk/busybox /data/adb/ap/bin/busybox /system/bin/busybox; do")
+            add("        if [ -f \"\$candidate\" ] && [ -x \"\$candidate\" ]; then")
+            add("            if \"\$candidate\" true >/dev/null 2>&1; then")
+            add("                echo \"\$candidate\"")
+            add("                return 0")
+            add("            fi")
+            add("        fi")
+            add("    done")
+            add("    if command -v busybox >/dev/null 2>&1; then")
+            add("        sys_bb=\$(command -v busybox)")
+            add("        if \"\$sys_bb\" true >/dev/null 2>&1; then")
+            add("            echo \"\$sys_bb\"")
+            add("            return 0")
+            add("        fi")
+            add("    fi")
+            add("    return 1")
+            add("}")
+            add("")
+            add("generate_random_port() {")
+            add("    if [ -c \"/dev/urandom\" ]; then")
+            add("        PORT=\$(od -An -N2 -tu2 /dev/urandom | tr -d ' ')")
+            add("        PORT=\$((6000 + (PORT % 4000)))")
+            add("    else")
+            add("        PORT=\$((6000 + (\$(date +%s) % 4000)))")
+            add("    fi")
+            add("    echo \"\$PORT\"")
+            add("}")
+            add("")
+            add("# KSUWebUI serves the same webroot in its own sandbox, where there is no httpd and")
+            add("# no token to check. Same app id and launch shape as the reference.")
+            add("if pm list packages 2>/dev/null | grep -q \"io.github.a13e300.ksuwebui\"; then")
+            add("    echo \"Launching natively inside KSUWebUI App...\"")
+            add("    su -c \"am start -n 'io.github.a13e300.ksuwebui/.WebUIActivity' -e id '$MODULE_ID'\" >/dev/null 2>&1")
+            add("    exit 0")
+            add("fi")
+            add("")
+            add("BB=\$(find_busybox)")
+            add("if [ -z \"\$BB\" ]; then")
+            add("    echo \"Error: Busybox not found! Cannot start WebUI.\"")
+            add("    exit 1")
+            add("fi")
+            add("")
+            add("RANDOM_PORT=\$(generate_random_port)")
+            add("")
+            add("# A fresh token per session, unreadable by anything else on the device, and removed")
+            add("# with the server when it dies.")
+            add("AUTH_TOKEN=\$(od -An -N16 -tx1 /dev/urandom | tr -d ' \\n')")
+            add("echo \"\$AUTH_TOKEN\" > \"\$MODDIR/auth_token\"")
+            add("chmod 0600 \"\$MODDIR/auth_token\"")
+            add("")
+            add("chmod -R 0755 \"\$MODDIR/webroot/cgi-bin\"")
+            add("")
+            add("BB_DIR=\$(\$BB dirname \"\$BB\")")
+            add("export PATH=\"\$BB_DIR:\$PATH\"")
+            add("")
+            add("# A stale server from an earlier button press must not hold the port.")
+            add("\$BB pkill -f \"httpd -p 127.0.0.1:\" >/dev/null 2>&1")
+            add("")
+            add("echo \"Starting background server and opening browser...\"")
+            add("")
+            add("(")
+            add("    \$BB httpd -p 127.0.0.1:\$RANDOM_PORT -h \"\$MODDIR/webroot\" >/dev/null 2>&1")
+            add("    sleep 300")
+            add("    \$BB pkill -f \"httpd -p 127.0.0.1:\$RANDOM_PORT\" >/dev/null 2>&1")
+            add("    rm -f \"\$MODDIR/auth_token\"")
+            add(") &")
+            add("")
+            add("sleep 1")
+            add("am start -a android.intent.action.VIEW -d \"http://127.0.0.1:\$RANDOM_PORT?token=\$AUTH_TOKEN\" >/dev/null 2>&1")
+            add("")
+            add("echo \"\"")
+            add("echo \"Done! The WebUI should now be open.\"")
+            add("echo \"It closes itself after 5 minutes.\"")
+            add("exit 0")
+            add("")
+        }
+    )
+
+    /**
+     * The WebUI's whole backend, as one CGI shell script.
+     *
+     * Ported in shape from `spoofdevice/GameUnlocker-main/webroot/cgi-bin/api.sh`, read in full.
+     * What is deliberately *not* ported is most of it: the reference's config is `config.json`, so
+     * every action there is a `jq` invocation — and `jq` is not present on most devices, which its
+     * own error paths concede. This module's whole state is a `system.prop` of `key=value` lines,
+     * so `sed` does everything and no external binary is required.
+     *
+     * The adaptive token rule is the reference's and is kept exactly: when `auth_token` exists (the
+     * httpd path) every request must carry it; when it does not, the page is being served inside
+     * KSUWebUI's native sandbox and the check is skipped.
+     *
+     * Two actions, both honest about what they did:
+     *
+     * - `get_state` reads the module's actual files — the model from `system.prop`, the real device
+     *   from `getprop`, the last verification line from [VERIFY_LOG_NAME] — and says `active: false`
+     *   when `system.prop` is missing rather than serving the install-time state as if it were live.
+     * - `set_model` rewrites exactly [MODEL_KEYS] in `system.prop`, so the channel's narrowing
+     *   survives an edit made outside the app: the WebUI cannot widen what the installer flashed.
+     *   The model is charset-validated because it lands in `sed` replacements and `module.prop`.
+     *   [KEY_PIXELPROPS_GAME] is deliberately left untouched — it was derived from the profile's
+     *   *brand* at export time, and the model string alone cannot re-derive it. The new model takes
+     *   effect at the next reboot, and [serviceSh] reports it then because it reads the model back
+     *   from `system.prop` rather than from a value baked at export.
+     */
+    private fun webApiSh(): String = lf(
+        buildList {
+            add("#!/system/bin/sh")
+            add("echo \"Content-Type: application/json\"")
+            add("echo \"\"")
+            add("")
+            add("MODDIR=\"/data/adb/modules/$MODULE_ID\"")
+            add("PROP=\"\$MODDIR/system.prop\"")
+            add("LOG=\"\$MODDIR/$VERIFY_LOG_NAME\"")
+            add("export PATH=\"\$MODDIR:\$PATH\"")
+            add("")
+            add("TOKEN=\$(echo \"\$QUERY_STRING\" | grep -o 'token=[^&]*' | cut -d= -f2)")
+            add("ACTION=\$(echo \"\$QUERY_STRING\" | grep -o 'action=[^&]*' | cut -d= -f2)")
+            add("VALUE=\$(echo \"\$QUERY_STRING\" | grep -o 'value=[^&]*' | cut -d= -f2)")
+            add("")
+            add("# Adaptive authentication, as in the reference: with an auth_token on disk (the")
+            add("# httpd path) every request must carry it; without one the page is inside KSUWebUI's")
+            add("# native sandbox and the check is skipped.")
+            add("if [ -f \"\$MODDIR/auth_token\" ]; then")
+            add("    EXPECTED_TOKEN=\$(cat \"\$MODDIR/auth_token\")")
+            add("    if [ \"\$TOKEN\" != \"\$EXPECTED_TOKEN\" ] || [ -z \"\$TOKEN\" ]; then")
+            add("        echo '{\"success\": false, \"error\": \"Unauthorized access. Invalid or missing token.\"}'")
+            add("        exit 1")
+            add("    fi")
+            add("fi")
+            add("")
+            add("urldecode() {")
+            add("  data=\"\$1\"")
+            add("  data=\${data//+/ }")
+            add("  printf '%b' \"\${data//%/\\\\x}\"")
+            add("}")
+            add("")
+            add("# -----------------------------------------------------------------------")
+            add("# get_state -- the module's live state, read from its own files")
+            add("# -----------------------------------------------------------------------")
+            add("if [ \"\$ACTION\" = \"get_state\" ]; then")
+            add("    if [ -f \"\$PROP\" ]; then")
+            add("        MODEL=\$(sed -n 's/^ro\\.product\\.model=//p' \"\$PROP\" | head -n 1 | tr -d '\"\\\\')")
+            add("        ACTIVE=true")
+            add("    else")
+            add("        # A missing system.prop is the neutralized or hand-stripped module. Reporting")
+            add("        # the install-time state as live would be the exact wrong answer.")
+            add("        MODEL=\"\"")
+            add("        ACTIVE=false")
+            add("    fi")
+            add("    REAL=\$(getprop ro.product.model | tr -d '\"\\\\')")
+            add("    PIXEL=\$(sed -n 's/^persist\\.sys\\.pixelprops\\.game=//p' \"\$PROP\" 2>/dev/null | head -n 1)")
+            add("    VERIFY=\"\"")
+            add("    if [ -f \"\$LOG\" ]; then")
+            add("        VERIFY=\$(grep '^applied ' \"\$LOG\" | tail -n 1 | tr -d '\"\\\\')")
+            add("    fi")
+            add("    echo \"{\\\"success\\\": true, \\\"active\\\": \$ACTIVE, \\\"model\\\": \\\"\$MODEL\\\", \\\"real\\\": \\\"\$REAL\\\", \\\"pixel\\\": \\\"\$PIXEL\\\", \\\"verify\\\": \\\"\$VERIFY\\\"}\"")
+            add("")
+            add("# -----------------------------------------------------------------------")
+            add("# set_model -- rewrite the model identity in system.prop, nothing else")
+            add("# -----------------------------------------------------------------------")
+            add("elif [ \"\$ACTION\" = \"set_model\" ]; then")
+            add("    VALUE=\$(urldecode \"\$VALUE\")")
+            add("    if [ -z \"\$VALUE\" ]; then")
+            add("        echo '{\"success\": false, \"error\": \"missing value\"}'")
+            add("        exit 0")
+            add("    fi")
+            add("    # The value lands in sed replacements and module.prop, so it is charset-bound")
+            add("    # rather than trusted: letters, digits, spaces and .()_- only, 64 chars max.")
+            add("    if ! echo \"\$VALUE\" | grep -Eq '^[A-Za-z0-9 .()_-]{1,64}\$'; then")
+            add("        echo '{\"success\": false, \"error\": \"a model name can only use letters, digits, spaces and .()_- (max 64)\"}'")
+            add("        exit 0")
+            add("    fi")
+            add("    if [ ! -f \"\$PROP\" ]; then")
+            add("        echo '{\"success\": false, \"error\": \"system.prop is missing - module not active. Re-flash it from the app.\"}'")
+            add("        exit 0")
+            add("    fi")
+            add("    # Exactly the keys the installer flashes. The WebUI edits the model; it cannot")
+            add("    # widen the channel from inside the module.")
+            add("    for KEY in \\")
+            add("        ro.product.model \\")
+            add("        ro.product.odm.model \\")
+            add("        ro.product.system.model \\")
+            add("        ro.product.vendor.model; do")
+            add("        sed -i \"s|^\$KEY=.*|\$KEY=\$VALUE|\" \"\$PROP\"")
+            add("    done")
+            add("    # The PixelProps switch is deliberately untouched: it was derived from the")
+            add("    # profile's brand when the module was exported, and the model string alone")
+            add("    # cannot re-derive brand from model.")
+            add("    sed -i \"s|^description=.*|description=Spoofs this device as \$VALUE (model identity only). Reboot to apply; then this line reports what did.|\" \"\$MODDIR/module.prop\"")
+            add("    echo '{\"success\": true}'")
+            add("")
+            add("else")
+            add("    echo '{\"success\": false, \"error\": \"invalid action\"}'")
+            add("fi")
+            add("")
+        }
+    )
+
+    /**
+     * The WebUI page: module state, one model field, no external resources.
+     *
+     * The reference's page imports a Google font and ships a tabbed dashboard for a config this
+     * module does not have. Ours is one screen for one job — read the state, change the model —
+     * and self-contained, because the page is served from the module directory over localhost with
+     * no guarantee the device has working networking beyond that loopback.
+     *
+     * Written as a raw string and stripped of `\r` at the end for the same reason every script
+     * here is built with explicit `\n`: the archive must not depend on how this source file is
+     * stored or checked out. It deliberately contains no `$` character, so no Kotlin template
+     * escaping can silently rewrite the page.
+     */
+    private fun webIndexHtml(): String = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CatSmoker Spoof Manager</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#101014;--surface:#1a1a20;--border:#2a2a32;--text:#f0f0f2;--muted:#8a8a94;
+--accent:#7c6ee6;--green:#22c55e;--red:#ef4444;--radius:12px}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,system-ui,sans-serif;
+font-size:14px;line-height:1.5;padding:16px;min-height:100vh}
+.wrap{max-width:560px;margin:0 auto}
+h1{font-size:18px;letter-spacing:-.3px}
+.sub{font-size:12px;color:var(--muted);margin-top:2px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+padding:16px;margin-top:14px}
+.row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;font-size:13px}
+.row .k{color:var(--muted)}
+.row .v{font-weight:600;text-align:right;word-break:break-word}
+.badge{font-size:11px;font-weight:600;padding:2px 9px;border-radius:99px}
+.ok{background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3)}
+.bad{background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.3)}
+input{width:100%;background:#232329;border:1px solid var(--border);color:var(--text);
+font-size:15px;padding:11px 13px;border-radius:8px;outline:none;font-family:inherit}
+input:focus{border-color:var(--accent)}
+button{margin-top:10px;width:100%;padding:11px;border:none;border-radius:8px;
+background:var(--accent);color:#fff;font-size:14px;font-weight:600;font-family:inherit}
+.note{font-size:12px;color:var(--muted);margin-top:10px}
+#msg{font-size:13px;margin-top:10px;min-height:18px}
+#msg.ok{color:var(--green)}#msg.bad{color:var(--red)}
+code{background:#232329;padding:1px 5px;border-radius:4px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>CatSmoker Spoof Manager</h1>
+<p class="sub">fpsunlocker module &middot; model identity only</p>
+
+<div class="card">
+<div class="row"><span class="k">Module</span><span class="v" id="state">&hellip;</span></div>
+<div class="row"><span class="k">Spoofed model</span><span class="v" id="model">&hellip;</span></div>
+<div class="row"><span class="k">This device</span><span class="v" id="real">&hellip;</span></div>
+<div class="row"><span class="k">PixelProps flag</span><span class="v" id="pixel">&hellip;</span></div>
+<div class="row"><span class="k">Last boot check</span><span class="v" id="verify">&hellip;</span></div>
+</div>
+
+<div class="card">
+<b style="font-size:14px">Change the spoofed model</b>
+<p class="note">Letters, digits, spaces and <code>.()_-</code> only. Applies to the whole device
+at the next reboot, exactly like re-flashing the module from the app.</p>
+<input id="newmodel" maxlength="64" placeholder="e.g. SM-S948B">
+<button onclick="apply()">Apply model</button>
+<div id="msg"></div>
+</div>
+
+<p class="note">This page is served from the module over localhost with a session token, and the
+server closes itself five minutes after the action button started it. The full profile and the
+per-app assignments live in the CatSmoker app; this page only edits the model this module
+flashes.</p>
+</div>
+
+<script>
+var TOKEN = new URLSearchParams(location.search).get('token') || '';
+
+function api(action, value, cb) {
+  var url = 'cgi-bin/api.sh?action=' + action + '&token=' + encodeURIComponent(TOKEN);
+  if (value !== undefined) url += '&value=' + encodeURIComponent(value);
+  fetch(url).then(function (r) { return r.json(); }).then(cb).catch(function () {
+    show('Could not reach the module server. It closes itself five minutes after it started - press the action button again.', false);
+  });
+}
+
+function show(text, ok) {
+  var el = document.getElementById('msg');
+  el.textContent = text;
+  el.className = ok ? 'ok' : 'bad';
+}
+
+function fill(s) {
+  document.getElementById('state').innerHTML =
+    s.active ? '<span class="badge ok">Active</span>' : '<span class="badge bad">Not active</span>';
+  document.getElementById('model').textContent = s.model || '(none)';
+  document.getElementById('real').textContent = s.real || '(unreadable)';
+  document.getElementById('pixel').textContent = s.pixel === '' ? '(not set)' : s.pixel;
+  document.getElementById('verify').textContent = s.verify || '(no boot check yet)';
+  document.getElementById('newmodel').value = s.model || '';
+}
+
+function apply() {
+  var value = document.getElementById('newmodel').value.trim();
+  api('set_model', value, function (r) {
+    if (r.success) {
+      show('Model saved. Reboot to apply it.', true);
+      api('get_state', undefined, fill);
+    } else {
+      show(r.error || 'The module refused the change.', false);
+    }
+  });
+}
+
+api('get_state', undefined, fill);
+</script>
+</body>
+</html>
+""".trimIndent().replace("\r", "") + "\n"
 
     /**
      * The stock Magisk installer entry point, reproduced from the script this app shipped as an

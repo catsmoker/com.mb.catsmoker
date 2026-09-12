@@ -25,6 +25,7 @@ data class DeviceProfile(
     var screenWidth: Int = 1080,
     var screenHeight: Int = 2400,
     var screenDensity: Int = 420,
+    var screenRefreshRate: Int = 0,
     var operatorAlpha: String = "",
     var operatorNumeric: String = "",
     var simOperatorAlpha: String = "",
@@ -42,6 +43,8 @@ data class DeviceProfile(
     var cpuAbiList32: String = "",
     var socModel: String = "",
     var socManufacturer: String = "",
+    var gpuVendor: String = "",
+    var gpuRenderer: String = "",
     var imei: String = "",
     var meid: String = "",
     var subscriberId: String = "",
@@ -102,6 +105,13 @@ data class DeviceProfile(
         cpuAbiList32 = cpuAbiList32.ifBlank { "armeabi-v7a,armeabi" }
         socModel = socModel.ifBlank { boardPlatform }
         socManufacturer = socManufacturer.ifBlank { manufacturer }
+        // GPU strings have no fallback on purpose. The preset devices' GPU identifiers were
+        // never verified, so every preset carries these blank — which renders as "do not spoof
+        // the GL strings" rather than an invented "Adreno (TM) 750" that would disagree with
+        // the real silicon the same way a fabricated board codename would.
+        // screenRefreshRate is the same shape: the presets' panel tiers were verified as models
+        // present in a game's table, not as panel specs, so a default rate here would be an
+        // invented number where the real one is already read by every hook that needs it.
     }
 
     private fun String.slugify(): String {

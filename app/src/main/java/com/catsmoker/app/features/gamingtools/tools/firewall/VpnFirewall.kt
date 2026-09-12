@@ -8,6 +8,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.VpnService
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.catsmoker.app.R
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -127,18 +128,16 @@ class VpnFirewall @Inject constructor(
     fun start(gamePackages: List<String>): String? {
         when (val consent = consent()) {
             is Consent.Required ->
-                return "You have not said yes to the VPN yet. Tap the switch again and choose OK."
+                return context.getString(R.string.gt_vpn_consent)
             is Consent.Unknown ->
-                return "Android would not say whether the VPN is allowed (${consent.reason}). " +
-                    "Tap the switch again."
+                return context.getString(R.string.gt_vpn_unknown, consent.reason)
             Consent.Granted -> Unit
         }
         val targets = blockTargets(gamePackages)
         if (targets.isEmpty()) {
             // Establishing with an empty allow-list routes *every* app into the tun, which would cut
             // the whole device off the network. Refusing is the only correct answer.
-            return "There is nothing to block — every app on your phone is either part of Android " +
-                "itself or one of your games."
+            return context.getString(R.string.gt_vpn_nothing)
         }
         pendingBlockList = targets
         _state.update { it.copy(lastError = null) }
@@ -146,7 +145,7 @@ class VpnFirewall @Inject constructor(
             context.startService(Intent(context, VpnFirewallService::class.java))
             null
         } catch (e: Exception) {
-            "Your phone would not start it (${e.javaClass.simpleName})"
+            context.getString(R.string.gt_vpn_start_fail, e.javaClass.simpleName)
         }
     }
 

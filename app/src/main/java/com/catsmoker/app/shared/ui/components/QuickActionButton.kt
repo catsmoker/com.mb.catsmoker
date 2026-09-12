@@ -39,16 +39,25 @@ fun QuickActionButton(
     isFullWidth: Boolean = false,
     showChevron: Boolean = false,
     statusTag: (@Composable () -> Unit)? = null,
+    /**
+     * True while the tap's work is still running. The tile goes non-clickable and shows
+     * a spinner plus a thin bar, so a slow action (ZIP export, shell push) reads as busy
+     * instead of dead until its toast lands.
+     */
+    isLoading: Boolean = false,
+    enabled: Boolean = true,
     icon: @Composable () -> Unit
 ) {
+    val clickable = enabled && !isLoading
     Card(
         onClick = onClick,
+        enabled = clickable,
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Box(modifier = Modifier.fillMaxWidth()) {
             DotGridBackground(modifier = Modifier.matchParentSize())
@@ -77,7 +86,7 @@ fun QuickActionButton(
                         Text(
                             text = title,
                             style = MaterialTheme.typography.titleMedium,
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -85,16 +94,21 @@ fun QuickActionButton(
                         Text(
                             text = subtitle,
                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                            color = Color.White.copy(alpha = 0.6f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    if (showChevron) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else if (showChevron) {
                         Icon(
                             imageVector = Icons.Default.ChevronRight,
                             contentDescription = null,
-                            tint = Color.Gray,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -104,23 +118,35 @@ fun QuickActionButton(
                     modifier = Modifier.padding(18.dp),
                     horizontalAlignment = Alignment.Start
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(iconContainerColor)
-                            .border(1.dp, iconContentColor.copy(alpha = 0.28f), RoundedCornerShape(14.dp)),
-                        contentAlignment = Alignment.Center
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        CompositionLocalProvider(LocalContentColor provides iconContentColor) {
-                            icon()
+                        Box(
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(iconContainerColor)
+                                .border(1.dp, iconContentColor.copy(alpha = 0.28f), RoundedCornerShape(14.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CompositionLocalProvider(LocalContentColor provides iconContentColor) {
+                                icon()
+                            }
+                        }
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
                         }
                     }
                     Spacer(modifier = Modifier.height(22.dp))
                     Text(
                         text = title,
                         style = MaterialTheme.typography.titleMedium,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -131,13 +157,23 @@ fun QuickActionButton(
                         Text(
                             text = subtitle,
                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                            color = Color.White.copy(alpha = 0.6f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             minLines = 2,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
+            }
+
+            if (isLoading) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp))
+                )
             }
         }
     }

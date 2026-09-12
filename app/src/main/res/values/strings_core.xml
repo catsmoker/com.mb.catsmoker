@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Core dashboard / navigation strings (feature: main, about, logs, permissions, startup). -->
+    <!-- Back-press exit toast (%1$d = remaining taps). -->
+    <string name="core_exit_tap">Tap %1$d more times to exit</string>
+
+    <!-- Dashboard metric abbreviations (kept short in every locale). -->
+    <string name="core_metric_cpu">CPU</string>
+    <string name="core_metric_ram">RAM</string>
+    <string name="core_metric_soc">SOC</string>
+    <string name="core_metric_temp">TEMP</string>
+    <string name="core_metric_ping">PING</string>
+
+    <!-- Compact fallback labels shown in place of a missing dashboard reading. -->
+    <string name="core_compact_loading">…</string>
+    <string name="core_compact_privilege">root?</string>
+    <string name="core_compact_unsupported">n/s</string>
+    <string name="core_compact_na">N/A</string>
+
+    <!-- Dashboard Settings tile (only tile without a shared entry). -->
+    <string name="core_settings_title">Settings</string>
+    <string name="core_settings_subtitle">Configuration &amp; Preferences</string>
+
+    <!-- About screen. -->
+    <string name="core_about_subtitle">App information and community.</string>
+    <string name="core_about_description">CatSmoker is an open-source performance utility for Android. Our mission is to provide gamers with the best possible experience by optimizing system resources and unlocking hidden potential.</string>
+
+    <!-- Logs screen ViewModel messages (%1$s = detail). -->
+    <string name="core_logs_fetch_error">Error fetching logs: %1$s</string>
+    <string name="core_logs_share_title">Share Logs</string>
+
+    <!-- Shared scaffold back button (talkback). -->
+    <string name="core_back">Back</string>
+
+    <!-- Onboarding terms step. Prefix/suffix carry their edge space via \u0020. -->
+    <string name="core_terms_prefix">Please read our\u0020</string>
+    <string name="core_terms_link">Terms and Conditions</string>
+    <string name="core_terms_suffix">\u0020before using the app.</string>
+    <string name="core_terms_title">Terms of Service</string>
+    <string name="core_terms_agree">I agree to the terms.</string>
+    <string name="core_continue">CONTINUE</string>
+
+    <!-- Permissions screen. -->
+    <string name="core_permissions_title">Permissions</string>
+    <string name="core_permissions_subtitle">Grant permissions to enable all features.</string>
+    <string name="core_perm_root_title">Root Access</string>
+    <string name="core_perm_root_sub">Required for advanced optimizations.</string>
+    <string name="core_perm_shizuku_title">Shizuku Access</string>
+    <string name="core_perm_shizuku_sub">Alternative to Root for system tweaks.</string>
+    <string name="core_perm_storage_title">Storage Access</string>
+    <string name="core_perm_storage_sub">To read/modify game configuration files.</string>
+    <string name="core_perm_battery_title">Battery Optimization</string>
+    <string name="core_perm_battery_sub">Allows the app to run smoothly in background.</string>
+    <string name="core_perm_notif_title">Notifications</string>
+    <string name="core_perm_notif_sub">To show service status.</string>
+    <string name="core_perm_overlay_title">Overlay</string>
+    <string name="core_perm_overlay_sub">To show performance monitors.</string>
+    <string name="core_perm_usage_title">Usage Stats</string>
+    <string name="core_perm_usage_sub">To track game playtime.</string>
+    <string name="core_perm_mic_title">Microphone</string>
+    <string name="core_perm_mic_sub">Required for Audio Boost features.</string>
+    <string name="core_perm_bt_title">Bluetooth</string>
+    <string name="core_perm_bt_sub">Required for Gamepad and headset optimizations.</string>
+    <string name="core_done">DONE</string>
+    <string name="core_grant">GRANT</string>
+    <!-- MetricReadStatus full labels: the reason shown in place of a value on the dashboard
+         and in the performance overlay, when the device never reported a number. -->
+    <string name="core_read_loading">reading…</string>
+    <string name="core_read_ok">ok</string>
+    <string name="core_read_empty">no data</string>
+    <string name="core_read_parse">unreadable</string>
+    <string name="core_read_privilege">needs root/Shizuku</string>
+    <string name="core_read_unsupported">unsupported</string>
+</resources>

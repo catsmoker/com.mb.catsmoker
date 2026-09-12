@@ -29,7 +29,7 @@ fun SectionCard(
         colors = CardDefaults.cardColors(
             containerColor = if (enabled) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
         ),
-        border = BorderStroke(1.dp, if (enabled) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.02f))
+        border = BorderStroke(1.dp, if (enabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.outlineVariant)
     ) {
         Column(
             modifier = Modifier.padding(20.dp),
@@ -59,7 +59,7 @@ fun InfoCard(
             Text(
                 text = content,
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color.White.copy(alpha = 0.8f),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                 lineHeight = 20.sp
             )
         }

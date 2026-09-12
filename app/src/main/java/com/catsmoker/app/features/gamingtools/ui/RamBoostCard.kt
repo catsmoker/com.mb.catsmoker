@@ -5,11 +5,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.catsmoker.app.R
 import com.catsmoker.app.shared.ui.components.SectionCard
+import com.catsmoker.app.shared.ui.components.CatsmokerButton
 
 /**
  * The RAM boost button and its result.
@@ -28,16 +30,16 @@ fun RamBoostCard(
     SectionCard {
         Column(modifier = Modifier.fillMaxWidth()) {
             Text(
-                text = "SYSTEM TWEAKS",
+                text = stringResource(R.string.gt_ram_title),
                 style = MaterialTheme.typography.labelSmall,
-                color = Color.Gray,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 letterSpacing = 1.sp,
                 fontWeight = FontWeight.Bold
             )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Button(
+            CatsmokerButton(
                 onClick = onBoostRam,
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !isBoostingRam,
@@ -46,7 +48,7 @@ fun RamBoostCard(
                 if (isBoostingRam) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                 } else {
-                    Text("Free up memory")
+                    Text(stringResource(R.string.gt_ram_free))
                 }
             }
 
@@ -55,19 +57,18 @@ fun RamBoostCard(
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     text = ramResult,
-                    color = Color.LightGray,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                     fontSize = 12.sp
                 )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
             CollapsibleExplainer(
-                title = "What is this?",
+                title = stringResource(R.string.gt_explainer_what),
                 lines = listOf(
-                    "It asks your phone to close apps that are sitting in the background doing nothing, " +
-                        "which frees up memory for your game.",
-                    "It tells you how much it actually freed, measured before and after — not a guess.",
-                    "Nothing you have open is closed, and nothing is deleted."
+                    stringResource(R.string.gt_ram_what_1),
+                    stringResource(R.string.gt_ram_what_2),
+                    stringResource(R.string.gt_ram_what_3)
                 )
             )
         }

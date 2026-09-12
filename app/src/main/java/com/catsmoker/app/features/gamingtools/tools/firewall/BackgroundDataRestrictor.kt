@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
+import com.catsmoker.app.R
 import com.catsmoker.app.system.shell.ShellRunner
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -124,7 +125,7 @@ class BackgroundDataRestrictor @Inject constructor(
      */
     suspend fun enable(gamePackages: List<String>): Outcome = withContext(Dispatchers.IO) {
         if (!shellRunner.hasPrivilege()) {
-            return@withContext Outcome(false, "Needs root or Shizuku. Android does not let a normal app change this.")
+            return@withContext Outcome(false, context.getString(R.string.gt_needs_root_shizuku_change))
         }
 
         val wasOn = readDataSaver(privileged = true)
@@ -135,20 +136,20 @@ class BackgroundDataRestrictor @Inject constructor(
         var perAppNote: String
         val blacklisted = mutableListOf<Int>()
         if (alreadyRestricted == null) {
-            perAppNote = "your phone would not say which apps are blocked, so none were changed"
+            perAppNote = context.getString(R.string.gt_bdr_no_verify)
         } else {
             val targets = restrictableUids(gamePackages) - alreadyRestricted
             if (targets.isEmpty()) {
-                perAppNote = "there were no other apps left to block"
+                perAppNote = context.getString(R.string.gt_bdr_no_targets)
             } else {
                 runNetpolicyBatch("add", "restrict-background-blacklist", targets)
                 val nowRestricted = readRestrictedUids().orEmpty()
                 blacklisted += targets.filter { it in nowRestricted }
                 val refused = targets.size - blacklisted.size
                 perAppNote = if (refused == 0) {
-                    "${blacklisted.size} apps stopped"
+                    context.getString(R.string.gt_bdr_blocked, blacklisted.size)
                 } else {
-                    "${blacklisted.size} of ${targets.size} apps stopped — your phone said no to $refused"
+                    context.getString(R.string.gt_bdr_blocked_some, blacklisted.size, targets.size, refused)
                 }
             }
         }
@@ -173,34 +174,43 @@ class BackgroundDataRestrictor @Inject constructor(
             // guessing either way would be inventing the previous state.
             .putString("data_saver_was", wasOn?.toString() ?: "unknown")
             .putStringSet("uids_we_added", exempted.map { it.toString() }.toSet())
-            .putStringSet("uids_we_blocked", blacklisted.map { it.toString() }.toSet())
+            // Union, not overwrite: a previous revert may have retained verified-still-blocked
+            // UIDs for retry, and dropping them here would forget apps that never got unblocked.
+            .putStringSet(
+                "uids_we_blocked",
+                blacklisted.map { it.toString() }.toSet() +
+                    prefs.getStringSet("uids_we_blocked", emptySet()).orEmpty()
+            )
             .putBoolean("engaged", true)
             .apply()
 
         val saverNote = when {
-            !dataSaverOn -> "your phone would not turn Data Saver on"
-            failedExempt.isEmpty() -> "Data Saver is on and your games are let through"
-            else -> "Data Saver is on, but these games could not be let through: " +
-                failedExempt.joinToString()
+            !dataSaverOn -> context.getString(R.string.gt_bdr_saver_off)
+            failedExempt.isEmpty() -> context.getString(R.string.gt_bdr_saver_ok)
+            else -> context.getString(R.string.gt_bdr_saver_exempt, failedExempt.joinToString())
         }
         // The blocking half is what the switch promises, so success follows it.
         val success = blacklisted.isNotEmpty() || dataSaverOn
-        Outcome(success, "$perAppNote · $saverNote")
+        Outcome(success, context.getString(R.string.gt_bdr_result, perAppNote, saverNote))
     }
 
     /** Puts back what [enable] changed, and nothing else. */
     suspend fun disable(): Outcome = withContext(Dispatchers.IO) {
         if (!shellRunner.hasPrivilege()) {
-            return@withContext Outcome(false, "Needs root or Shizuku. Android does not let a normal app change this.")
+            return@withContext Outcome(false, context.getString(R.string.gt_needs_root_shizuku_change))
         }
 
         // Only the entries this app added: a policy the user set for some other app in Settings is
         // not ours to remove.
-        val blocked = prefs.getStringSet("uids_we_blocked", emptySet()).orEmpty().mapNotNull { it.toIntOrNull() }
+        val blocked = prefs.getStringSet("uids_we_blocked", emptySet()).orEmpty()
+            .mapNotNull { it.toIntOrNull() }.toSet()
         if (blocked.isNotEmpty()) {
-            runNetpolicyBatch("remove", "restrict-background-blacklist", blocked.toSet())
+            runNetpolicyBatch("remove", "restrict-background-blacklist", blocked)
         }
-        val stillBlocked = readRestrictedUids()?.let { after -> blocked.count { it in after } } ?: 0
+        // Verified, not assumed: whatever refused to lift stays on our record instead of being
+        // deleted from it, so the next disable retries exactly the leftovers. Wiping the whole
+        // set up front is what left apps blocked ("stopped") with no trace after a revert.
+        val stillBlocked = partitionStillBlocked(blocked, readRestrictedUids())
 
         val ours = prefs.getStringSet("uids_we_added", emptySet()).orEmpty().mapNotNull { it.toIntOrNull() }
         for (uid in ours) {
@@ -208,32 +218,49 @@ class BackgroundDataRestrictor @Inject constructor(
         }
 
         val wasOn = prefs.getString("data_saver_was", "unknown")
-        var saverNote = "Data Saver was left the way it was"
+        var saverNote = context.getString(R.string.gt_bdr_saver_left)
         if (wasOn == "false") {
             shellRunner.execSafeResult("cmd", "netpolicy", "set", "restrict-background", "false")
             saverNote = if (readDataSaver(privileged = true) == false) {
-                "Data Saver is off again"
+                context.getString(R.string.gt_bdr_saver_off_again)
             } else {
-                "Data Saver would not turn back off"
+                context.getString(R.string.gt_bdr_saver_stuck)
             }
         } else if (wasOn == "true") {
-            saverNote = "Data Saver was already on before, so it was left on"
+            saverNote = context.getString(R.string.gt_bdr_saver_was_on)
         }
 
         prefs.edit()
-            .putBoolean("engaged", false)
+            // A leftover block is still ours, so the record — and the engaged flag the Gaming Mode
+            // snapshot reads — stays until a disable actually lifts it. Only a verified-clean
+            // revert clears the evidence.
+            .putBoolean("engaged", stillBlocked.isNotEmpty())
             .remove("uids_we_added")
-            .remove("uids_we_blocked")
             .apply()
+        if (stillBlocked.isEmpty()) {
+            prefs.edit().remove("uids_we_blocked").apply()
+        } else {
+            prefs.edit()
+                .putStringSet("uids_we_blocked", stillBlocked.map { it.toString() }.toSet())
+                .apply()
+        }
 
         val unblockNote = when {
-            blocked.isEmpty() -> "no apps had been stopped"
-            stillBlocked == 0 -> "${blocked.size} apps can use data again"
-            else -> "${blocked.size - stillBlocked} of ${blocked.size} apps can use data again — " +
-                "$stillBlocked are still stopped"
+            blocked.isEmpty() -> context.getString(R.string.gt_bdr_unblock_none)
+            stillBlocked.isEmpty() -> context.getString(R.string.gt_bdr_unblock_all, blocked.size)
+            else -> context.getString(
+                R.string.gt_bdr_unblock_some,
+                blocked.size - stillBlocked.size,
+                blocked.size,
+                stillBlocked.size
+            )
         }
-        Outcome(stillBlocked == 0, "$unblockNote · $saverNote")
+        Outcome(stillBlocked.isEmpty(), context.getString(R.string.gt_bdr_result, unblockNote, saverNote))
     }
+
+    /** Whether a previous revert left verified-still-blocked UIDs behind for the next disable to retry. */
+    fun hasRetainedBlocks(): Boolean =
+        prefs.getStringSet("uids_we_blocked", emptySet()).orEmpty().isNotEmpty()
 
     /** Whether this app is the one holding the restriction on, per its own record. */
     fun isEngaged(): Boolean = prefs.getBoolean("engaged", false)
@@ -349,6 +376,17 @@ class BackgroundDataRestrictor @Inject constructor(
 
         /** Below this are platform UIDs, which never belong to an installed app. */
         private const val MIN_APP_UID = 10000
+
+        /**
+         * Which of [requested] UIDs are still denied after the removal attempt, from the
+         * read-back listing.
+         *
+         * A null [after] means the listing itself is unreadable on this device — the same state
+         * in which [enable] never blocks anything per-app, so there is nothing provable to
+         * retain and the answer is empty rather than a guess in either direction.
+         */
+        fun partitionStillBlocked(requested: Set<Int>, after: Set<Int>?): Set<Int> =
+            if (after == null) emptySet() else requested intersect after
 
         /**
          * Pulls the UIDs out of a `cmd netpolicy list …` line.

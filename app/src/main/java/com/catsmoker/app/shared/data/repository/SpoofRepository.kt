@@ -2,6 +2,7 @@ package com.catsmoker.app.shared.data.repository
 
 import android.content.Context
 import android.content.Intent
+import com.catsmoker.app.features.gamingtools.engine.DisplayRefreshRateProvider
 import com.catsmoker.app.shared.data.model.DevicePreset
 import com.catsmoker.app.shared.data.model.DeviceProfile
 import com.catsmoker.app.shared.data.model.LSPosedConfig
@@ -9,6 +10,7 @@ import com.catsmoker.app.shared.util.DisplayMetricsProvider
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,7 +26,10 @@ import javax.inject.Singleton
 @Singleton
 class SpoofRepository @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val displayMetrics: DisplayMetricsProvider
+    private val displayMetrics: DisplayMetricsProvider,
+    // Refresh rate, not resolution: the two display facts have two owners, and this one picks the
+    // rate-ladder winner — the split is by question, not by caller.
+    private val displayRefreshRate: DisplayRefreshRateProvider
 ) {
     private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
     private val storeFile = File(context.filesDir, "app_profiles.json")
@@ -43,7 +48,28 @@ class SpoofRepository @Inject constructor(
         val version: Int = 1,
         val profiles: List<ProfileEntry> = emptyList(),
         val assignments: Map<String, String> = emptyMap(),
+        /**
+         * Per-package frame-rate ladders, from `zygisk-Tweaker-main/module/config/tweaker.json`'s
+         * per-game `tweaker` arrays: a game whose device table offers more than one tier gets a
+         * *different* identity per tier, and the winner is picked against the panel's measured
+         * peak by [pickRateCandidate] at publish time — not frozen into the store.
+         *
+         * The reference's `rate` field is an int or an int array (`90` or `[90,120]`). A pair here
+         * carries one rate, and the array form is expressed by listing the same profile at several
+         * rates — equivalent under the pick rule, because "highest tier the panel can honor, else
+         * the lowest" lands on the same model either way.
+         *
+         * A non-empty ladder owns its package; the plain [assignments] entry is cleared when a
+         * ladder is built, so exactly one of the two ever applies.
+         */
+        val rateAssignments: Map<String, List<RateCandidate>> = emptyMap(),
         val globalProperties: Map<String, String> = emptyMap()
+    )
+
+    /** One rung of a package's frame-rate ladder: the profile to show the game at [rateHz]. */
+    data class RateCandidate(
+        val profileId: String,
+        val rateHz: Int
     )
 
     data class ProfileEntry(
@@ -95,6 +121,7 @@ class SpoofRepository @Inject constructor(
             if (!storeFile.exists()) return@runCatching null
             gson.fromJson(storeFile.readText(), StoreData::class.java)
                 ?.takeIf { it.profiles.isNotEmpty() }
+                ?.let(::repaired)
         }.getOrNull()
         return parsed ?: createDefaultData()
     }
@@ -119,8 +146,7 @@ class SpoofRepository @Inject constructor(
 
     suspend fun getProfileForPackage(packageName: String): DeviceProfile? {
         val data = loadData()
-        val profileId = data.assignments[packageName] ?: return null
-        return data.profiles.find { it.id == profileId }?.profile
+        return resolveProfileForPackage(data, packageName, displayRefreshRate.getMaxHardwareRefreshRate())
     }
 
     /**
@@ -370,6 +396,14 @@ class SpoofRepository @Inject constructor(
         addProp("ro.product.cpu.abilist32", profile.cpuAbiList32)
         addProp("ro.soc.model", profile.socModel)
         addProp("ro.soc.manufacturer", profile.socManufacturer)
+
+        // GPU identity for the GL-string hooks. Rendered as a pair or not at all — the two keys
+        // are only ever set together by the editor, and a lone vendor beside a real renderer is
+        // a stronger mismatch signal than neither (see DeviceProfile.applyFallbacks).
+        if (profile.gpuVendor.isNotBlank() && profile.gpuRenderer.isNotBlank()) {
+            addProp(LSPosedConfig.KEY_GPU_VENDOR, profile.gpuVendor)
+            addProp(LSPosedConfig.KEY_GPU_RENDERER, profile.gpuRenderer)
+        }
         
         partitions.forEach { p ->
             addProp("ro.$p.build.fingerprint", profile.buildFingerprint)
@@ -379,6 +413,13 @@ class SpoofRepository @Inject constructor(
         addProp("screen.width", if (profile.screenWidth > 0) profile.screenWidth.toString() else "")
         addProp("screen.height", if (profile.screenHeight > 0) profile.screenHeight.toString() else "")
         addProp("screen.density", if (profile.screenDensity > 0) profile.screenDensity.toString() else "")
+        // Rendered as one of our own profile keys (never a system property), read only by the
+        // Display hook — zero means the hook is not installed for this profile at all, the same
+        // blank-means-off contract the GPU strings follow.
+        addProp(
+            LSPosedConfig.KEY_SCREEN_REFRESH_RATE,
+            if (profile.screenRefreshRate > 0) profile.screenRefreshRate.toString() else ""
+        )
         
         // Network
         addProp("gsm.operator.alpha", profile.operatorAlpha)
@@ -431,5 +472,89 @@ class SpoofRepository @Inject constructor(
             type.ifBlank { "user" },
             tags.ifBlank { "release-keys" }
         )
+    }
+
+    companion object {
+        /**
+         * Picks which ladder rung the panel earns, from `zygisk-Tweaker-main`'s stated selection
+         * rule (README, "Frequently Asked Questions"): *"If `refresh_rate` is set to 144, but the
+         * disguised device models do not support 144 … it will automatically lower the frame rate
+         * to the closest supported value. For example, if there are two device models, one
+         * supports 120 and the other supports 90, then 144 will be lowered to 120."*
+         *
+         * That is: **the highest tier the panel can honor, stepping down to the closest one
+         * below.** The module's native code is shipped only as compiled `.so` files, so the
+         * agreement asserted here is with the README's rule and the `tweaker.json` shape (both
+         * read in full), not with code nobody has read.
+         *
+         * The panel peak is rounded to whole Hz before comparing, because Android reports
+         * nominal 120 Hz panels as modes like `119.999985` — an unrounded compare would step a
+         * 120 Hz rung down to 90 on a panel that is, for every purpose the game cares about, a
+         * 120 Hz panel.
+         *
+         * Two cases the README does not cover, decided here and stated rather than smuggled in:
+         * * A panel below every rung (a 60 Hz panel with 90/120 rungs) gets the **lowest** rung.
+         *   The rule never raises a rung above what the panel reported, and "the closest
+         *   supported value" from below is still the lowest one. The game then offers its 90 FPS
+         *   tier against a panel that cannot render it — the same outcome the reference's own
+         *   `fps_unlock` switch produces on such a panel.
+         * * A tie (two rungs at the same rate) keeps the first in list order, i.e. the order the
+         *   user built the ladder in.
+         *
+         * Divergences from the reference, deliberate:
+         * * It freezes the detected rate into `settings.refresh_rate` once, at install (its
+         *   `customize.sh` reads `dumpsys SurfaceFlinger` / `mDefaultPeakRefreshRate`, falling
+         *   back to a hard-coded 90). This app re-reads the panel's measured peak
+         *   ([DisplayRefreshRateProvider.getMaxHardwareRefreshRate], supported-modes scan with a
+         *   60 Hz floor) at every publish and every profile lookup, so a foldable's inner panel
+         *   or a changed default display re-picks without reinstalling anything.
+         * * No manual override of the detected rate — the point here is that the panel's own
+         *   number decides, and an override would let a user ask for a tier the hardware cannot
+         *   render while the UI still said "auto-detected".
+         *
+         * @return the winning rung, or null when the ladder is empty — never a fabricated pick.
+         */
+        fun pickRateCandidate(candidates: List<RateCandidate>, panelPeakHz: Float): RateCandidate? {
+            if (candidates.isEmpty()) return null
+            val peak = panelPeakHz.roundToInt()
+            return candidates.filter { it.rateHz <= peak }.maxByOrNull { it.rateHz }
+                ?: candidates.minByOrNull { it.rateHz }
+        }
+
+        /**
+         * The profile a package is actually spoofed with: its frame-rate ladder's winner when it
+         * has one, otherwise its plain assignment.
+         *
+         * Rungs whose profile has since been deleted are ignored rather than resolved to nothing —
+         * a ladder that lost its winner falls back to whatever rungs remain, and only a ladder
+         * with no survivors at all falls through to the plain assignment.
+         */
+        fun resolveProfileForPackage(
+            data: StoreData,
+            packageName: String,
+            panelPeakHz: Float
+        ): DeviceProfile? {
+            val ladder = data.rateAssignments[packageName].orEmpty()
+                .filter { candidate -> data.profiles.any { it.id == candidate.profileId } }
+            if (ladder.isNotEmpty()) {
+                val winner = pickRateCandidate(ladder, panelPeakHz) ?: return null
+                return data.profiles.firstOrNull { it.id == winner.profileId }?.profile
+            }
+            val profileId = data.assignments[packageName] ?: return null
+            return data.profiles.firstOrNull { it.id == profileId }?.profile
+        }
+
+        /**
+         * Fills in the field defaults Gson skips.
+         *
+         * Gson bypasses the constructor, so a store saved before [StoreData.rateAssignments]
+         * existed deserializes that field as null despite the non-null type — every reader would
+         * then have to defend against a value the type promises cannot happen. Repairing it once,
+         * at the single place JSON enters the app, keeps the promise true everywhere else.
+         */
+        internal fun repaired(parsed: StoreData): StoreData {
+            val legacyRates: Map<String, List<RateCandidate>>? = parsed.rateAssignments
+            return if (legacyRates == null) parsed.copy(rateAssignments = emptyMap()) else parsed
+        }
     }
 }

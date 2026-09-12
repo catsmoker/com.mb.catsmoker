@@ -7,47 +7,48 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.catsmoker.app.R
 import com.catsmoker.app.shared.ui.components.ScreenScaffold
 import com.catsmoker.app.shared.ui.components.SectionCard
 
 @Composable
 fun DiagnosticsScreen(onBack: () -> Unit) {
     ScreenScaffold(
-        title = "Diagnostics",
-        subtitle = "Current device identity (spoofed or real).",
+        title = stringResource(R.string.spoof_menu_diag),
+        subtitle = stringResource(R.string.spoof_diag_subtitle),
         onBack = onBack
     ) {
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            DiagGroup(title = "Hardware") {
-                DiagField("Brand", Build.BRAND)
-                DiagField("Manufacturer", Build.MANUFACTURER)
-                DiagField("Model", Build.MODEL)
-                DiagField("Product", Build.PRODUCT)
-                DiagField("Device", Build.DEVICE)
-                DiagField("Board", Build.BOARD)
-                DiagField("Hardware", Build.HARDWARE)
+            DiagGroup(title = stringResource(R.string.spoof_diag_hardware)) {
+                DiagField(stringResource(R.string.spoof_field_brand), Build.BRAND)
+                DiagField(stringResource(R.string.spoof_field_manufacturer), Build.MANUFACTURER)
+                DiagField(stringResource(R.string.spoof_field_model), Build.MODEL)
+                DiagField(stringResource(R.string.spoof_diag_product), Build.PRODUCT)
+                DiagField(stringResource(R.string.spoof_diag_device), Build.DEVICE)
+                DiagField(stringResource(R.string.spoof_field_board), Build.BOARD)
+                DiagField(stringResource(R.string.spoof_field_hardware), Build.HARDWARE)
             }
 
-            DiagGroup(title = "Software") {
-                DiagField("Android Release", Build.VERSION.RELEASE)
-                DiagField("SDK Level", Build.VERSION.SDK_INT.toString())
-                DiagField("Build ID", Build.ID)
-                DiagField("Incremental", Build.VERSION.INCREMENTAL)
-                DiagField("Fingerprint", Build.FINGERPRINT)
+            DiagGroup(title = stringResource(R.string.spoof_diag_software)) {
+                DiagField(stringResource(R.string.spoof_diag_release), Build.VERSION.RELEASE)
+                DiagField(stringResource(R.string.spoof_field_sdk), Build.VERSION.SDK_INT.toString())
+                DiagField(stringResource(R.string.spoof_field_build_id), Build.ID)
+                DiagField(stringResource(R.string.spoof_field_incremental), Build.VERSION.INCREMENTAL)
+                DiagField(stringResource(R.string.spoof_field_fingerprint), Build.FINGERPRINT)
             }
             
-            DiagGroup(title = "System") {
-                DiagField("Bootloader", Build.BOOTLOADER)
-                DiagField("Radio/Modem", Build.getRadioVersion() ?: "Unknown")
-                DiagField("Tags", Build.TAGS)
-                DiagField("Type", Build.TYPE)
+            DiagGroup(title = stringResource(R.string.spoof_diag_system)) {
+                DiagField(stringResource(R.string.spoof_field_bootloader), Build.BOOTLOADER)
+                DiagField(stringResource(R.string.spoof_diag_radio), Build.getRadioVersion() ?: stringResource(R.string.spoof_diag_unknown))
+                DiagField(stringResource(R.string.spoof_diag_tags), Build.TAGS)
+                DiagField(stringResource(R.string.spoof_diag_type), Build.TYPE)
             }
         }
     }
@@ -56,7 +57,7 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
 @Composable
 fun DiagGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column {
-        Text(title, style = MaterialTheme.typography.labelSmall, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp))
+        Text(title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
         SectionCard(content = content)
     }
 }
@@ -67,7 +68,7 @@ fun DiagField(label: String, value: String) {
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(label, color = Color.Gray, fontSize = 14.sp)
-        Text(value, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
+        Text(value, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
 }
